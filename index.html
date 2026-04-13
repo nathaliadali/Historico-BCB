@@ -1143,24 +1143,36 @@ async function renderChartBusca(datas) {
   const selicData = await getSelicData();
   if (!selicData || selicData.length === 0) return;
 
-  // Converter datas encontradas para timestamps
-  const encontradas = new Set();
+  // Normaliza as datas encontradas para ISO YYYY-MM-DD
+  const encontradasISO = [];
   datas.forEach(d => {
     if (!d) return;
     const dt = new Date(d);
-    if (!isNaN(dt)) encontradas.add(dt.toISOString().slice(0,10));
+    if (!isNaN(dt)) encontradasISO.push(dt.toISOString().slice(0, 10));
   });
 
-  // Subset dos últimos 15 anos para performance
-  const cutoff = new Date();
-  cutoff.setFullYear(cutoff.getFullYear() - 15);
-  const filtered = selicData.filter(p => new Date(p.x) >= cutoff);
+  // Determina janela: do mais antigo resultado até hoje
+  const datesMs = encontradasISO.map(d => new Date(d).getTime()).filter(Boolean);
+  const earliest = datesMs.length > 0 ? new Date(Math.min(...datesMs)) : (() => { const d = new Date(); d.setFullYear(d.getFullYear()-15); return d; })();
+  const filtered = selicData.filter(p => new Date(p.x) >= earliest);
 
-  const pontos = filtered.map(p => ({
-    x: p.x,
-    y: p.y,
-    r: encontradas.has(p.x) ? 7 : 0
-  }));
+  // Para cada data de ocorrência, encontra o ponto Selic mais próximo
+  const selicDates = filtered.map(p => p.x); // já ordenado
+  function nearestSelic(isoDate) {
+    const ms = new Date(isoDate).getTime();
+    let best = null, bestDiff = Infinity;
+    for (const p of filtered) {
+      const diff = Math.abs(new Date(p.x).getTime() - ms);
+      if (diff < bestDiff) { bestDiff = diff; best = p; }
+      if (diff > bestDiff) break; // array ordenado, pode parar
+    }
+    return best;
+  }
+
+  const ocorrenciaPontos = encontradasISO.map(iso => {
+    const p = nearestSelic(iso);
+    return p ? { x: p.x, y: p.y } : null;
+  }).filter(Boolean);
 
   if (chartBusca) { chartBusca.destroy(); chartBusca = null; }
 
@@ -1178,7 +1190,7 @@ async function renderChartBusca(datas) {
         fill: false
       }, {
         label: 'Ocorrências',
-        data: pontos.filter(p => p.r > 0).map(p => ({x: p.x, y: p.y})),
+        data: ocorrenciaPontos,
         borderColor: 'transparent',
         backgroundColor: '#00BADB',
         pointRadius: 7,
@@ -1194,7 +1206,10 @@ async function renderChartBusca(datas) {
         x: { type: 'time', time: { unit: 'year' }, grid: { color: '#eee' } },
         y: { title: { display: true, text: 'Selic (% a.a.)' }, grid: { color: '#eee' } }
       },
-      plugins: { legend: { display: true }, tooltip: { mode: 'index', intersect: false } }
+      plugins: {
+        legend: { display: true },
+        tooltip: { mode: 'index', intersect: false }
+      }
     }
   });
 }
