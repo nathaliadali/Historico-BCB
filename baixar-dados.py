@@ -16,6 +16,11 @@ Uso:
   py baixar-dados.py --rebuild      (ignora arquivos existentes e rebaixa tudo)
 """
 
+import sys, io
+# Força UTF-8 no terminal Windows
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 import urllib.request
 import urllib.error
 import json
@@ -37,7 +42,8 @@ DOCS_DIR = os.path.join(DATA_DIR, "docs")
 
 API_ATA   = "https://www.bcb.gov.br/api/servico/sitebcb/copom/atas_detalhes?nro_reuniao={}"
 API_COM   = "https://www.bcb.gov.br/api/servico/sitebcb/copom/comunicados_detalhes?nro_reuniao={}"
-API_SELIC = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.432/dados?formato=json"
+# Selic: máx 10 anos por chamada — busca em lotes com dataInicial/dataFinal
+API_SELIC = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.432/dados?formato=json&dataInicial={}&dataFinal={}"
 
 # -----------------------------------------------------------------------
 # HTML → texto puro
@@ -77,12 +83,21 @@ def html_to_text(raw):
 def fetch_json(url, retries=3):
     for attempt in range(retries):
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "BCB-Historico/1.0"})
-            with urllib.request.urlopen(req, timeout=20) as resp:
-                return json.loads(resp.read().decode("utf-8"))
+            req = urllib.request.Request(url, headers={
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "application/json",
+            })
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                raw = resp.read()
+                # tenta UTF-8, depois latin-1
+                try:
+                    text = raw.decode("utf-8")
+                except UnicodeDecodeError:
+                    text = raw.decode("latin-1")
+                return json.loads(text)
         except Exception as e:
             if attempt < retries - 1:
-                time.sleep(0.5 * (attempt + 1))
+                time.sleep(1.0 * (attempt + 1))
             else:
                 return None
 
@@ -104,23 +119,57 @@ for i, arg in enumerate(sys.argv):
 # Download Selic
 # -----------------------------------------------------------------------
 def baixar_selic():
-    print("\nBaixando série histórica da Selic...")
+    from datetime import date, timedelta
+    print("\nBaixando serie historica da Selic...")
     selic_file = os.path.join(DATA_DIR, "selic.json")
     if os.path.exists(selic_file) and not rebuild:
         data = json.loads(open(selic_file, encoding="utf-8").read())
-        print(f"  ✓ já existe ({len(data)} pontos)")
+        print(f"  OK: ja existe ({len(data)} pontos)")
         return data
-    data_raw = fetch_json(API_SELIC)
-    if not data_raw:
-        print("  ✗ erro ao baixar Selic")
-        return []
+
+    # Busca em lotes de ~9 anos para ficar dentro do limite da API
+    todos = []
+    hoje  = date.today()
+    # COPOM começou em 1996; dados diários da Selic a partir de 01/06/1996
+    inicio = date(1996, 6, 1)
+    lote   = 0
+    while inicio < hoje:
+        fim = date(min(inicio.year + 9, hoje.year + 1), inicio.month, inicio.day) - timedelta(days=1)
+        if fim > hoje:
+            fim = hoje
+        di = inicio.strftime("%d/%m/%Y")
+        df = fim.strftime("%d/%m/%Y")
+        url = API_SELIC.format(di, df)
+        print(f"  Lote {lote+1}: {di} a {df}...", end=" ", flush=True)
+        raw = fetch_json(url)
+        if raw and isinstance(raw, list):
+            for p in raw:
+                if not isinstance(p, dict):
+                    continue
+                date_str = str(p.get("data", ""))
+                valor    = str(p.get("valor", "0")).replace(",", ".")
+                parts = date_str.split("/")
+                if len(parts) == 3:
+                    todos.append({"x": f"{parts[2]}-{parts[1]}-{parts[0]}", "y": float(valor)})
+            print(f"{len(raw)} pontos")
+        else:
+            print("sem dados")
+        inicio = fim + timedelta(days=1)
+        lote  += 1
+        time.sleep(0.3)
+
+    # Remove duplicatas e ordena
+    seen = set()
     data = []
-    for p in data_raw:
-        parts = p["data"].split("/")
-        data.append({"x": f"{parts[2]}-{parts[1]}-{parts[0]}", "y": float(p["valor"])})
+    for p in todos:
+        if p["x"] not in seen:
+            seen.add(p["x"])
+            data.append(p)
+    data.sort(key=lambda x: x["x"])
+
     with open(selic_file, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False)
-    print(f"  ✓ {len(data)} observações → data/selic.json")
+    print(f"  OK: {len(data)} observacoes -> data/selic.json")
     return data
 
 # -----------------------------------------------------------------------
@@ -219,10 +268,10 @@ def baixar_reunioes():
         json.dump(search_index, f, ensure_ascii=False)
 
     idx_kb = os.path.getsize(idx_path) // 1024
-    print(f"\n  ✓ {total} reuniões")
-    print(f"  ✓ data/meta.json")
-    print(f"  ✓ data/search-index.json  ({idx_kb} KB)")
-    print(f"  ✓ data/docs/  ({total*2} arquivos individuais)")
+    print(f"\n  OK: {total} reunioes")
+    print(f"  OK: data/meta.json")
+    print(f"  OK: data/search-index.json  ({idx_kb} KB)")
+    print(f"  OK: data/docs/  ({total*2} arquivos individuais)")
 
     return meta, search_index
 

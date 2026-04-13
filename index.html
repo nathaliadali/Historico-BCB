@@ -660,7 +660,9 @@
 // =====================================================================
 const API_ATA    = n => `https://www.bcb.gov.br/api/servico/sitebcb/copom/atas_detalhes?nro_reuniao=${n}`;
 const API_COM    = n => `https://www.bcb.gov.br/api/servico/sitebcb/copom/comunicados_detalhes?nro_reuniao=${n}`;
-const API_SELIC  = 'https://api.bcb.gov.br/dados/serie/bcdata.sgs.432/dados?formato=json';
+// Selic: API exige dataInicial (máx 10 anos por chamada) — busca últimos 10 anos por padrão
+// O arquivo local data/selic.json gerado pelo baixar-dados.py tem o histórico completo
+const API_SELIC_RANGE = (di, df) => `https://api.bcb.gov.br/dados/serie/bcdata.sgs.432/dados?formato=json&dataInicial=${di}&dataFinal=${df}`;
 const CACHE_KEY_META    = 'bcb_meta_v2';
 const CACHE_KEY_SELIC   = 'bcb_selic_v2';
 const CACHE_KEY_DOCS    = 'bcb_docs_v2';
@@ -1222,20 +1224,23 @@ async function getSelicData() {
     }
   } catch {}
 
-  // Fallback: API do BCB
-  const res = await fetch(API_SELIC).catch(() => null);
-  if (!res || !res.ok) return null;
-  const json = await res.json().catch(() => null);
-  if (!json) return null;
-
-  const data = json.map(p => {
-    const parts = p.data.split('/');
-    const iso = `${parts[2]}-${parts[1]}-${parts[0]}`;
-    return { x: iso, y: parseFloat(p.valor) };
-  });
-
-  setCache(CACHE_KEY_SELIC, data);
-  return data;
+  // Fallback: API do BCB — busca últimos 10 anos
+  try {
+    const hoje = new Date();
+    const df = hoje.toLocaleDateString('pt-BR').replace(/\//g, '/'); // DD/MM/YYYY
+    const di_date = new Date(hoje); di_date.setFullYear(hoje.getFullYear() - 10);
+    const di = di_date.toLocaleDateString('pt-BR').replace(/\//g, '/');
+    const res = await fetch(API_SELIC_RANGE(di, df));
+    if (!res.ok) return null;
+    const json = await res.json().catch(() => null);
+    if (!Array.isArray(json)) return null;
+    const data = json.map(p => {
+      const parts = p.data.split('/');
+      return { x: `${parts[2]}-${parts[1]}-${parts[0]}`, y: parseFloat(p.valor) };
+    });
+    setCache(CACHE_KEY_SELIC, data);
+    return data;
+  } catch { return null; }
 }
 
 async function loadSelic() {
