@@ -1,0 +1,1295 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Histórico BCB — Atas e Comunicados COPOM</title>
+<link href="https://fonts.googleapis.com/css2?family=Palanquin:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bcb:   #1B3157;
+    --bcb2:  #0D6696;
+    --teal:  #2E96BF;
+    --cyan:  #00BADB;
+    --green: #5FBB47;
+    --red:   #b91c1c;
+    --bg:    #f4f7fb;
+    --card:  #ffffff;
+    --border:#dde3ec;
+    --text:  #1a2540;
+    --muted: #6b7a9a;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Palanquin', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  /* HEADER */
+  header {
+    background: var(--bcb);
+    color: #fff;
+    padding: 18px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  header h1 { font-size: 1.25rem; font-weight: 600; letter-spacing: .02em; }
+  header p  { font-size: .8rem; opacity: .75; margin-top: 2px; }
+  .header-left { display: flex; flex-direction: column; }
+
+  /* BOTÃO ATUALIZAR BASE */
+  .btn-refresh {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--cyan);
+    color: var(--bcb);
+    border: none;
+    border-radius: 8px;
+    padding: 9px 18px;
+    font-family: inherit;
+    font-size: .88rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .18s, transform .1s;
+    white-space: nowrap;
+  }
+  .btn-refresh:hover { background: #00d4f5; }
+  .btn-refresh:active { transform: scale(.97); }
+  .btn-refresh svg { width: 16px; height: 16px; flex-shrink: 0; }
+  .btn-refresh.loading svg { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* MODAL ATUALIZAR */
+  .modal-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.45);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--card);
+    border-radius: 14px;
+    padding: 32px;
+    width: min(480px, 94vw);
+    box-shadow: 0 12px 48px rgba(0,0,0,.22);
+  }
+  .modal h2 { font-size: 1.1rem; color: var(--bcb); margin-bottom: 8px; }
+  .modal p  { font-size: .88rem; color: var(--muted); margin-bottom: 20px; line-height: 1.5; }
+  .progress-bar-wrap {
+    background: var(--border);
+    border-radius: 99px;
+    height: 10px;
+    overflow: hidden;
+    margin-bottom: 10px;
+  }
+  .progress-bar {
+    background: var(--cyan);
+    height: 100%;
+    border-radius: 99px;
+    transition: width .3s;
+    width: 0%;
+  }
+  .progress-label {
+    font-size: .8rem;
+    color: var(--muted);
+    text-align: center;
+    margin-bottom: 20px;
+    min-height: 18px;
+  }
+  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+  .btn-cancel {
+    background: transparent;
+    border: 1.5px solid var(--border);
+    color: var(--muted);
+    border-radius: 8px;
+    padding: 8px 18px;
+    font-family: inherit;
+    font-size: .88rem;
+    cursor: pointer;
+  }
+  .btn-cancel:hover { border-color: var(--muted); }
+  .btn-ok {
+    background: var(--bcb);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 20px;
+    font-family: inherit;
+    font-size: .88rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .btn-ok:hover { background: var(--bcb2); }
+
+  /* TABS */
+  nav.tabs {
+    background: var(--bcb);
+    display: flex;
+    gap: 2px;
+    padding: 0 24px;
+    border-bottom: 3px solid var(--cyan);
+  }
+  nav.tabs button {
+    background: transparent;
+    border: none;
+    color: rgba(255,255,255,.65);
+    font-family: inherit;
+    font-size: .88rem;
+    font-weight: 500;
+    padding: 12px 20px;
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    margin-bottom: -3px;
+    transition: color .15s, border-color .15s;
+    white-space: nowrap;
+  }
+  nav.tabs button:hover { color: #fff; }
+  nav.tabs button.active { color: var(--cyan); border-bottom-color: var(--cyan); }
+
+  /* MAIN */
+  main { padding: 28px 32px; max-width: 1100px; margin: 0 auto; }
+
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* CARD */
+  .card {
+    background: var(--card);
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    padding: 24px;
+    margin-bottom: 20px;
+  }
+  .card-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--bcb);
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* CONTROLS */
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 14px;
+    margin-bottom: 0;
+  }
+  .field { display: flex; flex-direction: column; gap: 5px; }
+  .field label { font-size: .8rem; color: var(--muted); font-weight: 500; }
+  .field input[type=number], .field input[type=text] {
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-family: inherit;
+    font-size: .95rem;
+    color: var(--text);
+    width: 130px;
+    outline: none;
+    transition: border-color .15s;
+  }
+  .field input[type=text] { width: 260px; }
+  .field input:focus { border-color: var(--cyan); }
+
+  .btn-primary {
+    background: var(--bcb2);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 9px 22px;
+    font-family: inherit;
+    font-size: .9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .btn-primary:hover { background: var(--teal); }
+  .btn-primary:disabled { background: var(--border); color: var(--muted); cursor: not-allowed; }
+
+  .btn-pdf {
+    background: transparent;
+    border: 1.5px solid var(--bcb);
+    color: var(--bcb);
+    border-radius: 8px;
+    padding: 9px 18px;
+    font-family: inherit;
+    font-size: .88rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: background .15s;
+  }
+  .btn-pdf:hover { background: var(--bcb); color: #fff; }
+
+  /* STATUS */
+  .status {
+    font-size: .82rem;
+    color: var(--muted);
+    margin: 10px 0 0;
+    min-height: 18px;
+  }
+  .status.error { color: var(--red); }
+
+  /* DIFF */
+  .diff-header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 16px;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .diff-meta {
+    display: flex;
+    gap: 20px;
+    font-size: .82rem;
+    color: var(--muted);
+    flex-wrap: wrap;
+  }
+  .diff-meta span { display: flex; align-items: center; gap: 4px; }
+  .badge {
+    display: inline-block;
+    border-radius: 6px;
+    padding: 2px 9px;
+    font-size: .75rem;
+    font-weight: 600;
+  }
+  .badge-green { background: #e8f9e3; color: #2d7a1f; }
+  .badge-red   { background: #fde8e8; color: #8a1414; }
+
+  .legend {
+    display: flex;
+    gap: 16px;
+    font-size: .8rem;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+  .legend span { display: flex; align-items: center; gap: 5px; }
+  .legend-dot { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+
+  .diff-output {
+    font-size: .88rem;
+    line-height: 1.9;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 600px;
+    overflow-y: auto;
+    padding: 16px;
+    background: #fafbfd;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  ins { color: var(--green); text-decoration: none; font-weight: 600; }
+  del { color: var(--red); text-decoration: line-through; opacity: .8; }
+
+  /* BUSCA */
+  .search-results { margin-top: 20px; }
+  .results-section { margin-bottom: 28px; }
+  .results-section h3 {
+    font-size: .95rem;
+    font-weight: 600;
+    color: var(--bcb2);
+    border-bottom: 2px solid var(--cyan);
+    padding-bottom: 6px;
+    margin-bottom: 14px;
+  }
+  .result-item {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    transition: border-color .15s, box-shadow .15s;
+  }
+  .result-item:hover { border-color: var(--cyan); box-shadow: 0 2px 12px rgba(0,186,219,.1); }
+  .result-item-date { font-size: .78rem; color: var(--muted); margin-bottom: 5px; }
+  .result-item-snippet { font-size: .88rem; line-height: 1.6; }
+  mark { background: #fff3a3; color: #7a5c00; border-radius: 3px; padding: 0 2px; }
+  .result-link {
+    font-size: .78rem;
+    color: var(--bcb2);
+    font-weight: 600;
+    margin-top: 6px;
+    display: inline-block;
+  }
+
+  /* MODAL TEXTO COMPLETO */
+  .modal-full {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.5);
+    z-index: 2000;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 40px 16px;
+    overflow-y: auto;
+  }
+  .modal-full.open { display: flex; }
+  .modal-full-inner {
+    background: var(--card);
+    border-radius: 14px;
+    padding: 32px;
+    width: min(860px, 96vw);
+    max-height: 90vh;
+    overflow-y: auto;
+    position: relative;
+  }
+  .modal-full-close {
+    position: sticky;
+    top: 0;
+    float: right;
+    background: var(--border);
+    border: none;
+    border-radius: 50%;
+    width: 34px; height: 34px;
+    cursor: pointer;
+    font-size: 1.1rem;
+    color: var(--text);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .modal-full-close:hover { background: var(--bcb); color: #fff; }
+  .modal-full-title { font-size: 1rem; font-weight: 600; color: var(--bcb); margin-bottom: 16px; padding-right: 40px; }
+  .modal-full-text { font-size: .88rem; line-height: 1.9; white-space: pre-wrap; word-break: break-word; }
+
+  /* CHART */
+  .chart-wrap { position: relative; height: 320px; }
+
+  /* SELIC TAB */
+  .selic-chart-wrap { position: relative; height: 420px; }
+  .selic-info {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+  .selic-stat {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 20px;
+    text-align: center;
+  }
+  .selic-stat .val { font-size: 1.5rem; font-weight: 700; color: var(--bcb); }
+  .selic-stat .lbl { font-size: .75rem; color: var(--muted); margin-top: 2px; }
+
+  /* SPINNER inline */
+  .spinner {
+    display: inline-block;
+    width: 16px; height: 16px;
+    border: 2.5px solid var(--border);
+    border-top-color: var(--bcb2);
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+    vertical-align: middle;
+    margin-right: 6px;
+  }
+
+  /* PRINT */
+  @media print {
+    header, nav.tabs, .controls, .btn-pdf, .btn-primary, .btn-refresh,
+    .modal-overlay, .modal-full, .tab-panel:not(.active),
+    .search-results, .chart-wrap, .selic-chart-wrap,
+    .status, .legend { display: none !important; }
+    .tab-panel.active { display: block !important; }
+    .diff-output {
+      max-height: none !important;
+      overflow: visible !important;
+      font-size: 10pt;
+      border: none;
+      background: #fff;
+    }
+    body { background: #fff; }
+    main { padding: 0; max-width: 100%; }
+    .card { border: none; padding: 0; box-shadow: none; }
+    ins { color: #2d7a1f; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    del { color: #8a1414; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .print-header { display: block !important; }
+  }
+  .print-header {
+    display: none;
+    font-size: 11pt;
+    color: #333;
+    margin-bottom: 12pt;
+    border-bottom: 1px solid #ccc;
+    padding-bottom: 8pt;
+  }
+  .print-header h2 { font-size: 13pt; color: #1B3157; }
+
+  @media (max-width: 600px) {
+    main { padding: 16px; }
+    nav.tabs { padding: 0 8px; overflow-x: auto; }
+    nav.tabs button { padding: 10px 12px; font-size: .8rem; }
+    header { padding: 14px 16px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <div class="header-left">
+    <h1>Histórico BCB — Atas e Comunicados COPOM</h1>
+    <p>Comparativo de reuniões, busca histórica e taxa Selic</p>
+  </div>
+  <button class="btn-refresh" id="btnRefresh" onclick="openRefreshModal()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
+      <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+    </svg>
+    Atualizar Base
+  </button>
+</header>
+
+<!-- MODAL ATUALIZAR BASE -->
+<div class="modal-overlay" id="refreshModal">
+  <div class="modal">
+    <h2>Atualizar Base de Dados</h2>
+    <p id="refreshModalDesc">Isso vai buscar todas as reuniões disponíveis na API do BCB e atualizar o cache local. Use quando houver novas reuniões do COPOM.</p>
+    <div class="progress-bar-wrap" id="refreshProgressWrap" style="display:none">
+      <div class="progress-bar" id="refreshProgressBar"></div>
+    </div>
+    <div class="progress-label" id="refreshProgressLabel"></div>
+    <div class="modal-actions" id="refreshActions">
+      <button class="btn-cancel" onclick="closeRefreshModal()">Cancelar</button>
+      <button class="btn-ok" id="btnConfirmRefresh" onclick="startRefresh()">Atualizar agora</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL TEXTO COMPLETO -->
+<div class="modal-full" id="modalFull">
+  <div class="modal-full-inner">
+    <button class="modal-full-close" onclick="closeFullModal()">✕</button>
+    <div class="modal-full-title" id="modalFullTitle"></div>
+    <div class="modal-full-text" id="modalFullText"></div>
+  </div>
+</div>
+
+<!-- TABS -->
+<nav class="tabs">
+  <button class="active" onclick="switchTab(0, this)">Comparativo de Atas</button>
+  <button onclick="switchTab(1, this)">Comparativo de Comunicados</button>
+  <button onclick="switchTab(2, this)">Busca por Palavra</button>
+  <button onclick="switchTab(3, this)">Histórico Selic</button>
+</nav>
+
+<main>
+
+  <!-- TAB 0 — COMPARATIVO ATAS -->
+  <div class="tab-panel active" id="tab0">
+    <div class="card">
+      <div class="card-title">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10,9 9,9 8,9"/></svg>
+        Comparar Atas
+      </div>
+      <div class="controls">
+        <div class="field">
+          <label>Reunião atual</label>
+          <input type="number" id="ataReuniao" value="270" min="1" max="999">
+        </div>
+        <div class="field">
+          <label>Reunião anterior</label>
+          <input type="number" id="ataReuniaoAnterior" value="269" min="1" max="999">
+        </div>
+        <button class="btn-primary" id="btnCompararAta" onclick="compararDocs('ata')">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          Comparar
+        </button>
+        <button class="btn-pdf" onclick="window.print()" id="btnPdfAta" style="display:none">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Baixar PDF
+        </button>
+      </div>
+      <p class="status" id="statusAta"></p>
+    </div>
+    <div class="card" id="resultAta" style="display:none">
+      <div class="print-header">
+        <h2>Comparativo de Atas COPOM</h2>
+        <p id="printHeaderAta"></p>
+      </div>
+      <div class="diff-header">
+        <div class="diff-meta" id="metaAta"></div>
+        <div class="legend">
+          <span><span class="legend-dot" style="background:#e8f9e3;border:1.5px solid var(--green)"></span> Adicionado</span>
+          <span><span class="legend-dot" style="background:#fde8e8;border:1.5px solid var(--red)"></span> Removido</span>
+        </div>
+      </div>
+      <div class="diff-output" id="diffAta"></div>
+    </div>
+  </div>
+
+  <!-- TAB 1 — COMPARATIVO COMUNICADOS -->
+  <div class="tab-panel" id="tab1">
+    <div class="card">
+      <div class="card-title">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+        Comparar Comunicados
+      </div>
+      <div class="controls">
+        <div class="field">
+          <label>Reunião atual</label>
+          <input type="number" id="comReuniao" value="270" min="1" max="999">
+        </div>
+        <div class="field">
+          <label>Reunião anterior</label>
+          <input type="number" id="comReuniaoAnterior" value="269" min="1" max="999">
+        </div>
+        <button class="btn-primary" id="btnCompararCom" onclick="compararDocs('comunicado')">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          Comparar
+        </button>
+        <button class="btn-pdf" onclick="window.print()" id="btnPdfCom" style="display:none">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Baixar PDF
+        </button>
+      </div>
+      <p class="status" id="statusCom"></p>
+    </div>
+    <div class="card" id="resultCom" style="display:none">
+      <div class="print-header">
+        <h2>Comparativo de Comunicados COPOM</h2>
+        <p id="printHeaderCom"></p>
+      </div>
+      <div class="diff-header">
+        <div class="diff-meta" id="metaCom"></div>
+        <div class="legend">
+          <span><span class="legend-dot" style="background:#e8f9e3;border:1.5px solid var(--green)"></span> Adicionado</span>
+          <span><span class="legend-dot" style="background:#fde8e8;border:1.5px solid var(--red)"></span> Removido</span>
+        </div>
+      </div>
+      <div class="diff-output" id="diffCom"></div>
+    </div>
+  </div>
+
+  <!-- TAB 2 — BUSCA -->
+  <div class="tab-panel" id="tab2">
+    <div class="card">
+      <div class="card-title">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        Busca por Palavra-chave
+      </div>
+      <div class="controls">
+        <div class="field">
+          <label>Palavra ou frase</label>
+          <input type="text" id="searchTerm" placeholder="ex: inflação, câmbio, juros..." onkeydown="if(event.key==='Enter')buscar()">
+        </div>
+        <button class="btn-primary" id="btnBuscar" onclick="buscar()">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          Buscar
+        </button>
+      </div>
+      <p class="status" id="statusBusca"></p>
+    </div>
+    <div id="searchResults" style="display:none">
+      <div class="card">
+        <div class="results-section">
+          <h3 id="resultsAtas">Atas</h3>
+          <div id="listaAtas"></div>
+        </div>
+        <div class="results-section">
+          <h3 id="resultsComunicados">Comunicados</h3>
+          <div id="listaComunicados"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Taxa Selic nas datas encontradas</div>
+        <div class="chart-wrap">
+          <canvas id="chartBusca"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 3 — HISTÓRICO SELIC -->
+  <div class="tab-panel" id="tab3">
+    <div class="card">
+      <div class="card-title">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        Taxa Selic — Histórico Completo
+      </div>
+      <div class="selic-info" id="selicInfo"></div>
+      <div class="selic-chart-wrap">
+        <canvas id="chartSelic"></canvas>
+      </div>
+      <p class="status" id="statusSelic"></p>
+    </div>
+  </div>
+
+</main>
+
+<script>
+// =====================================================================
+// CONSTANTES E ESTADO
+// =====================================================================
+const API_ATA    = n => `https://www.bcb.gov.br/api/servico/sitebcb/copom/atas_detalhes?nro_reuniao=${n}`;
+const API_COM    = n => `https://www.bcb.gov.br/api/servico/sitebcb/copom/comunicados_detalhes?nro_reuniao=${n}`;
+const API_SELIC  = 'https://api.bcb.gov.br/dados/serie/bcdata.sgs.432/dados?formato=json';
+const CACHE_KEY_META    = 'bcb_meta_v2';
+const CACHE_KEY_SELIC   = 'bcb_selic_v2';
+const CACHE_KEY_DOCS    = 'bcb_docs_v2';
+
+let chartBusca = null;
+let chartSelic = null;
+let refreshCancelled = false;
+
+// =====================================================================
+// TABS
+// =====================================================================
+function switchTab(idx, btn) {
+  document.querySelectorAll('.tab-panel').forEach((p, i) => p.classList.toggle('active', i === idx));
+  document.querySelectorAll('nav.tabs button').forEach((b, i) => b.classList.toggle('active', i === idx));
+  if (idx === 3 && !chartSelic) loadSelic();
+}
+
+// =====================================================================
+// UTILS
+// =====================================================================
+function fmtData(str) {
+  if (!str) return '—';
+  const d = new Date(str);
+  if (isNaN(d)) {
+    // tenta DD/MM/YYYY
+    const m = String(str).match(/(\d{2})\/(\d{2})\/(\d{4})/);
+    if (m) return `${m[0]}`;
+    return str;
+  }
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+function htmlToText(html) {
+  const dp = new DOMParser();
+  const doc = dp.parseFromString(html, 'text/html');
+  return doc.body ? doc.body.innerText : html;
+}
+
+function getCache(key) {
+  try { return JSON.parse(localStorage.getItem(key)); } catch { return null; }
+}
+function setCache(key, val) {
+  try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
+}
+function clearCache() {
+  localStorage.removeItem(CACHE_KEY_META);
+  localStorage.removeItem(CACHE_KEY_SELIC);
+  localStorage.removeItem(CACHE_KEY_DOCS);
+}
+
+async function fetchDoc(type, nro) {
+  const cacheKey = CACHE_KEY_DOCS;
+  const docs = getCache(cacheKey) || {};
+  const key = `${type}_${nro}`;
+  if (docs[key]) return docs[key];
+
+  const url = type === 'ata' ? API_ATA(nro) : API_COM(nro);
+  const res = await fetch(url);
+  if (!res.ok) return null;
+  const json = await res.json();
+  if (!json.conteudo || json.conteudo.length === 0) return null;
+  const data = json.conteudo[0];
+  docs[key] = data;
+  setCache(cacheKey, docs);
+  return data;
+}
+
+// =====================================================================
+// DIFF PALAVRA-A-PALAVRA (LCS)
+// =====================================================================
+function tokenize(text) {
+  return text.match(/\S+|\s+/g) || [];
+}
+
+function lcs(a, b) {
+  const m = a.length, n = b.length;
+  // Para textos grandes, limitar e usar abordagem simplificada
+  if (m * n > 500000) return lcsSimple(a, b);
+  const dp = Array.from({length: m+1}, () => new Uint16Array(n+1));
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (a[i-1] === b[j-1]) dp[i][j] = dp[i-1][j-1] + 1;
+      else dp[i][j] = Math.max(dp[i-1][j], dp[i][j-1]);
+    }
+  }
+  const result = [];
+  let i = m, j = n;
+  while (i > 0 && j > 0) {
+    if (a[i-1] === b[j-1]) { result.push({type:'eq', val:a[i-1]}); i--; j--; }
+    else if (dp[i-1][j] >= dp[i][j-1]) { result.push({type:'del', val:a[i-1]}); i--; }
+    else { result.push({type:'ins', val:b[j-1]}); j--; }
+  }
+  while (i > 0) { result.push({type:'del', val:a[i-1]}); i--; }
+  while (j > 0) { result.push({type:'ins', val:b[j-1]}); j--; }
+  return result.reverse();
+}
+
+function lcsSimple(a, b) {
+  // Diff simplificado por sentenças para textos muito grandes
+  const result = [];
+  const aSet = new Set(a);
+  const bSet = new Set(b);
+  let ai = 0, bi = 0;
+  while (ai < a.length || bi < b.length) {
+    if (ai < a.length && bi < b.length && a[ai] === b[bi]) {
+      result.push({type:'eq', val:a[ai]}); ai++; bi++;
+    } else if (ai < a.length && !bSet.has(a[ai])) {
+      result.push({type:'del', val:a[ai]}); ai++;
+    } else if (bi < b.length && !aSet.has(b[bi])) {
+      result.push({type:'ins', val:b[bi]}); bi++;
+    } else {
+      if (ai < a.length) { result.push({type:'del', val:a[ai]}); ai++; }
+      if (bi < b.length) { result.push({type:'ins', val:b[bi]}); bi++; }
+    }
+  }
+  return result;
+}
+
+function renderDiff(oldText, newText) {
+  const tokOld = tokenize(oldText);
+  const tokNew = tokenize(newText);
+  const ops = lcs(tokOld, tokNew);
+  let html = '';
+  let added = 0, removed = 0;
+  for (const op of ops) {
+    const v = op.val.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    if (op.type === 'eq') html += v;
+    else if (op.type === 'ins') { html += `<ins>${v}</ins>`; if (op.val.trim()) added++; }
+    else { html += `<del>${v}</del>`; if (op.val.trim()) removed++; }
+  }
+  return { html, added, removed };
+}
+
+// =====================================================================
+// COMPARAR DOCUMENTOS (ATAS / COMUNICADOS)
+// =====================================================================
+async function compararDocs(tipo) {
+  const isAta = tipo === 'ata';
+  const nAtual = parseInt(document.getElementById(isAta ? 'ataReuniao' : 'comReuniao').value);
+  const nAnterior = parseInt(document.getElementById(isAta ? 'ataReuniaoAnterior' : 'comReuniaoAnterior').value);
+  const btnId = isAta ? 'btnCompararAta' : 'btnCompararCom';
+  const statusId = isAta ? 'statusAta' : 'statusCom';
+  const resultId = isAta ? 'resultAta' : 'resultCom';
+  const diffId = isAta ? 'diffAta' : 'diffCom';
+  const metaId = isAta ? 'metaAta' : 'metaCom';
+  const pdfBtnId = isAta ? 'btnPdfAta' : 'btnPdfCom';
+  const printHdrId = isAta ? 'printHeaderAta' : 'printHeaderCom';
+
+  const btn = document.getElementById(btnId);
+  const status = document.getElementById(statusId);
+  btn.disabled = true;
+  document.getElementById(resultId).style.display = 'none';
+  document.getElementById(pdfBtnId).style.display = 'none';
+
+  if (isNaN(nAtual) || isNaN(nAnterior) || nAtual < 1 || nAnterior < 1) {
+    status.textContent = 'Informe números de reunião válidos.';
+    status.className = 'status error';
+    btn.disabled = false;
+    return;
+  }
+
+  status.innerHTML = `<span class="spinner"></span>Buscando reunião ${nAtual}…`;
+  status.className = 'status';
+
+  const [docAtual, docAnterior] = await Promise.all([
+    fetchDoc(tipo, nAtual).catch(() => null),
+    fetchDoc(tipo, nAnterior).catch(() => null)
+  ]);
+
+  if (!docAtual) {
+    status.textContent = `Reunião ${nAtual} não encontrada na API.`;
+    status.className = 'status error';
+    btn.disabled = false;
+    return;
+  }
+  if (!docAnterior) {
+    status.textContent = `Reunião ${nAnterior} não encontrada na API.`;
+    status.className = 'status error';
+    btn.disabled = false;
+    return;
+  }
+
+  status.innerHTML = '<span class="spinner"></span>Calculando diferenças…';
+
+  const textoAtual    = htmlToText(isAta ? (docAtual.textoAta || '') : (docAtual.textoComunicado || ''));
+  const textoAnterior = htmlToText(isAta ? (docAnterior.textoAta || '') : (docAnterior.textoComunicado || ''));
+
+  setTimeout(() => {
+    const { html, added, removed } = renderDiff(textoAnterior, textoAtual);
+
+    document.getElementById(diffId).innerHTML = html;
+    document.getElementById(resultId).style.display = 'block';
+    document.getElementById(pdfBtnId).style.display = 'flex';
+
+    const dataAtual    = fmtData(docAtual.dataReferencia || docAtual.dataPublicacao);
+    const dataAnterior = fmtData(docAnterior.dataReferencia || docAnterior.dataPublicacao);
+
+    document.getElementById(metaId).innerHTML = `
+      <span>📋 Reunião <strong>${nAtual}</strong> (${dataAtual})</span>
+      <span>vs</span>
+      <span>📋 Reunião <strong>${nAnterior}</strong> (${dataAnterior})</span>
+      <span><span class="badge badge-green">+${added} adições</span></span>
+      <span><span class="badge badge-red">−${removed} remoções</span></span>
+    `;
+    document.getElementById(printHdrId).textContent = `Reunião ${nAtual} (${dataAtual}) vs Reunião ${nAnterior} (${dataAnterior})`;
+
+    status.textContent = `Comparação concluída — ${added} palavras adicionadas, ${removed} removidas.`;
+    status.className = 'status';
+    btn.disabled = false;
+  }, 30);
+}
+
+// Sincronizar inputs (N → N-1)
+document.getElementById('ataReuniao').addEventListener('input', function() {
+  const v = parseInt(this.value);
+  if (!isNaN(v) && v > 1) document.getElementById('ataReuniaoAnterior').value = v - 1;
+});
+document.getElementById('comReuniao').addEventListener('input', function() {
+  const v = parseInt(this.value);
+  if (!isNaN(v) && v > 1) document.getElementById('comReuniaoAnterior').value = v - 1;
+});
+
+// =====================================================================
+// BUSCA POR PALAVRA
+// =====================================================================
+async function buscar() {
+  const termo = document.getElementById('searchTerm').value.trim();
+  if (!termo) return;
+
+  const btn = document.getElementById('btnBuscar');
+  const status = document.getElementById('statusBusca');
+  btn.disabled = true;
+  document.getElementById('searchResults').style.display = 'none';
+  status.className = 'status';
+
+  // Descobrir reuniões do cache
+  let meta = getCache(CACHE_KEY_META);
+  if (!meta || meta.length === 0) {
+    status.innerHTML = '<span class="spinner"></span>Descobrindo reuniões disponíveis (isso pode demorar na primeira vez)…';
+    meta = await descobrirReunioes((n, total) => {
+      status.innerHTML = `<span class="spinner"></span>Indexando reunião ${n}… (${total} encontradas)`;
+    });
+    setCache(CACHE_KEY_META, meta);
+  }
+
+  if (!meta || meta.length === 0) {
+    status.textContent = 'Não foi possível carregar a lista de reuniões.';
+    status.className = 'status error';
+    btn.disabled = false;
+    return;
+  }
+
+  const termoLower = termo.toLowerCase();
+  const resultadosAtas = [];
+  const resultadosComs = [];
+  const datasEncontradas = new Set();
+  let processados = 0;
+
+  status.innerHTML = `<span class="spinner"></span>Buscando em ${meta.length} reuniões…`;
+
+  for (const m of meta) {
+    processados++;
+    if (processados % 10 === 0) {
+      status.innerHTML = `<span class="spinner"></span>Buscando… ${processados}/${meta.length}`;
+      await new Promise(r => setTimeout(r, 0)); // yield para UI
+    }
+
+    // Ata
+    const ata = await fetchDoc('ata', m.nro).catch(() => null);
+    if (ata) {
+      const texto = htmlToText(ata.textoAta || '');
+      const idx = texto.toLowerCase().indexOf(termoLower);
+      if (idx !== -1) {
+        const trecho = extrairTrecho(texto, idx, termoLower.length);
+        resultadosAtas.push({ nro: m.nro, data: fmtData(ata.dataReferencia || ata.dataPublicacao), trecho, texto, titulo: ata.titulo });
+        datasEncontradas.add(ata.dataReferencia || ata.dataPublicacao);
+      }
+    }
+
+    // Comunicado
+    const com = await fetchDoc('comunicado', m.nro).catch(() => null);
+    if (com) {
+      const texto = htmlToText(com.textoComunicado || '');
+      const idx = texto.toLowerCase().indexOf(termoLower);
+      if (idx !== -1) {
+        const trecho = extrairTrecho(texto, idx, termoLower.length);
+        resultadosComs.push({ nro: m.nro, data: fmtData(com.dataReferencia), trecho, texto, titulo: com.titulo });
+        datasEncontradas.add(com.dataReferencia);
+      }
+    }
+  }
+
+  renderResultados(resultadosAtas, resultadosComs, termo, datasEncontradas);
+  status.textContent = `${resultadosAtas.length + resultadosComs.length} ocorrências encontradas em ${meta.length} reuniões.`;
+  btn.disabled = false;
+}
+
+function extrairTrecho(texto, idx, len) {
+  const inicio = Math.max(0, idx - 80);
+  const fim    = Math.min(texto.length, idx + len + 120);
+  let trecho = (inicio > 0 ? '…' : '') + texto.slice(inicio, fim) + (fim < texto.length ? '…' : '');
+  return trecho;
+}
+
+function highlightTermo(texto, termo) {
+  const re = new RegExp(`(${termo.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')})`, 'gi');
+  return texto.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(re, '<mark>$1</mark>');
+}
+
+function renderResultados(atas, coms, termo, datasEncontradas) {
+  document.getElementById('resultsAtas').textContent = `Atas (${atas.length})`;
+  document.getElementById('resultsComunicados').textContent = `Comunicados (${coms.length})`;
+
+  const renderLista = (items, containerId, tipo) => {
+    const el = document.getElementById(containerId);
+    if (items.length === 0) {
+      el.innerHTML = '<p style="color:var(--muted);font-size:.85rem">Nenhuma ocorrência encontrada.</p>';
+      return;
+    }
+    el.innerHTML = items.map((r, i) => `
+      <div class="result-item" onclick="abrirModal('${tipo}_${i}')">
+        <div class="result-item-date">Reunião ${r.nro} — ${r.data}</div>
+        <div class="result-item-snippet">${highlightTermo(r.trecho, termo)}</div>
+        <span class="result-link">Ler documento completo →</span>
+      </div>
+    `).join('');
+    // guardar dados no DOM para acesso
+    items.forEach((r, i) => {
+      const key = `${tipo}_${i}`;
+      window['_result_' + key] = r;
+      window['_termo_atual'] = termo;
+    });
+  };
+
+  renderLista(atas, 'listaAtas', 'ata');
+  renderLista(coms, 'listaComunicados', 'com');
+
+  document.getElementById('searchResults').style.display = 'block';
+  renderChartBusca(datasEncontradas);
+}
+
+function abrirModal(key) {
+  const r = window['_result_' + key];
+  const termo = window['_termo_atual'];
+  if (!r) return;
+  document.getElementById('modalFullTitle').textContent = `Reunião ${r.nro} — ${r.data}`;
+  document.getElementById('modalFullText').innerHTML = highlightTermo(r.texto, termo);
+  document.getElementById('modalFull').classList.add('open');
+}
+function closeFullModal() {
+  document.getElementById('modalFull').classList.remove('open');
+}
+
+// =====================================================================
+// CHART BUSCA
+// =====================================================================
+async function renderChartBusca(datas) {
+  const selicData = await getSelicData();
+  if (!selicData || selicData.length === 0) return;
+
+  // Converter datas encontradas para timestamps
+  const encontradas = new Set();
+  datas.forEach(d => {
+    if (!d) return;
+    const dt = new Date(d);
+    if (!isNaN(dt)) encontradas.add(dt.toISOString().slice(0,10));
+  });
+
+  // Subset dos últimos 15 anos para performance
+  const cutoff = new Date();
+  cutoff.setFullYear(cutoff.getFullYear() - 15);
+  const filtered = selicData.filter(p => new Date(p.x) >= cutoff);
+
+  const pontos = filtered.map(p => ({
+    x: p.x,
+    y: p.y,
+    r: encontradas.has(p.x) ? 7 : 0
+  }));
+
+  if (chartBusca) { chartBusca.destroy(); chartBusca = null; }
+
+  const ctx = document.getElementById('chartBusca').getContext('2d');
+  chartBusca = new Chart(ctx, {
+    type: 'line',
+    data: {
+      datasets: [{
+        label: 'Selic',
+        data: filtered,
+        borderColor: '#0D6696',
+        borderWidth: 1.5,
+        pointRadius: 0,
+        tension: 0.1,
+        fill: false
+      }, {
+        label: 'Ocorrências',
+        data: pontos.filter(p => p.r > 0).map(p => ({x: p.x, y: p.y})),
+        borderColor: 'transparent',
+        backgroundColor: '#00BADB',
+        pointRadius: 7,
+        pointHoverRadius: 9,
+        type: 'scatter',
+        showLine: false
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { type: 'time', time: { unit: 'year' }, grid: { color: '#eee' } },
+        y: { title: { display: true, text: 'Selic (% a.a.)' }, grid: { color: '#eee' } }
+      },
+      plugins: { legend: { display: true }, tooltip: { mode: 'index', intersect: false } }
+    }
+  });
+}
+
+// =====================================================================
+// SELIC
+// =====================================================================
+async function getSelicData() {
+  let cached = getCache(CACHE_KEY_SELIC);
+  if (cached && cached.length > 0) return cached;
+
+  const res = await fetch(API_SELIC).catch(() => null);
+  if (!res || !res.ok) return null;
+  const json = await res.json().catch(() => null);
+  if (!json) return null;
+
+  const data = json.map(p => {
+    const parts = p.data.split('/');
+    const iso = `${parts[2]}-${parts[1]}-${parts[0]}`;
+    return { x: iso, y: parseFloat(p.valor) };
+  });
+
+  setCache(CACHE_KEY_SELIC, data);
+  return data;
+}
+
+async function loadSelic() {
+  const status = document.getElementById('statusSelic');
+  status.innerHTML = '<span class="spinner"></span>Carregando série histórica da Selic…';
+
+  const data = await getSelicData();
+  if (!data || data.length === 0) {
+    status.textContent = 'Erro ao carregar dados da Selic.';
+    status.className = 'status error';
+    return;
+  }
+
+  // Stats
+  const vals = data.map(p => p.y);
+  const max  = Math.max(...vals);
+  const min  = Math.min(...vals);
+  const last = data[data.length - 1];
+
+  document.getElementById('selicInfo').innerHTML = `
+    <div class="selic-stat"><div class="val">${last.y.toFixed(2)}%</div><div class="lbl">Valor atual</div></div>
+    <div class="selic-stat"><div class="val">${max.toFixed(2)}%</div><div class="lbl">Máxima histórica</div></div>
+    <div class="selic-stat"><div class="val">${min.toFixed(2)}%</div><div class="lbl">Mínima histórica</div></div>
+    <div class="selic-stat"><div class="val">${data.length}</div><div class="lbl">Pontos de dados</div></div>
+  `;
+
+  if (chartSelic) { chartSelic.destroy(); chartSelic = null; }
+  const ctx = document.getElementById('chartSelic').getContext('2d');
+  chartSelic = new Chart(ctx, {
+    type: 'line',
+    data: {
+      datasets: [{
+        label: 'Taxa Selic (% a.a.)',
+        data: data,
+        borderColor: '#0D6696',
+        backgroundColor: 'rgba(0,186,219,0.08)',
+        borderWidth: 2,
+        pointRadius: 0,
+        pointHoverRadius: 5,
+        tension: 0.1,
+        fill: true
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: {
+          type: 'time',
+          time: { unit: 'year' },
+          grid: { color: '#eee' }
+        },
+        y: {
+          title: { display: true, text: 'Selic (% a.a.)' },
+          grid: { color: '#eee' }
+        }
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => `Selic: ${ctx.parsed.y.toFixed(2)}%`
+          }
+        }
+      }
+    }
+  });
+
+  status.textContent = `${data.length} observações carregadas.`;
+  status.className = 'status';
+}
+
+// =====================================================================
+// DESCOBRIR REUNIÕES (para busca)
+// =====================================================================
+async function descobrirReunioes(onProgress) {
+  const meta = [];
+  let nro = 270; // começa de um número alto e desce
+  let falhasConsecutivas = 0;
+  const maxFalhas = 5;
+
+  while (nro >= 1 && falhasConsecutivas < maxFalhas) {
+    if (onProgress) onProgress(nro, meta.length);
+    const ata = await fetchDoc('ata', nro).catch(() => null);
+    const com = await fetchDoc('comunicado', nro).catch(() => null);
+
+    if (ata || com) {
+      meta.push({
+        nro,
+        dataAta: ata ? (ata.dataReferencia || ata.dataPublicacao) : null,
+        dataCom: com ? com.dataReferencia : null
+      });
+      falhasConsecutivas = 0;
+    } else {
+      falhasConsecutivas++;
+    }
+    nro--;
+  }
+
+  return meta.sort((a, b) => b.nro - a.nro);
+}
+
+// =====================================================================
+// ATUALIZAR BASE
+// =====================================================================
+function openRefreshModal() {
+  refreshCancelled = false;
+  document.getElementById('refreshProgressWrap').style.display = 'none';
+  document.getElementById('refreshProgressLabel').textContent = '';
+  document.getElementById('refreshModalDesc').textContent = 'Isso vai buscar todas as reuniões disponíveis na API do BCB e atualizar o cache local. Use quando houver novas reuniões do COPOM.';
+  document.getElementById('refreshActions').innerHTML = `
+    <button class="btn-cancel" onclick="closeRefreshModal()">Cancelar</button>
+    <button class="btn-ok" id="btnConfirmRefresh" onclick="startRefresh()">Atualizar agora</button>
+  `;
+  document.getElementById('refreshModal').classList.add('open');
+}
+
+function closeRefreshModal() {
+  refreshCancelled = true;
+  document.getElementById('refreshModal').classList.remove('open');
+  document.getElementById('btnRefresh').classList.remove('loading');
+}
+
+async function startRefresh() {
+  refreshCancelled = false;
+  document.getElementById('btnConfirmRefresh').disabled = true;
+  document.getElementById('btnRefresh').classList.add('loading');
+  document.getElementById('refreshProgressWrap').style.display = 'block';
+  document.getElementById('refreshModalDesc').textContent = 'Buscando reuniões disponíveis na API do BCB…';
+  document.getElementById('refreshActions').innerHTML = `
+    <button class="btn-cancel" onclick="cancelRefresh()">Cancelar</button>
+  `;
+
+  clearCache();
+
+  const INICIO = 270;
+  let nro = INICIO;
+  let falhasConsecutivas = 0;
+  const maxFalhas = 5;
+  const meta = [];
+  let processados = 0;
+
+  const bar   = document.getElementById('refreshProgressBar');
+  const label = document.getElementById('refreshProgressLabel');
+
+  while (nro >= 1 && falhasConsecutivas < maxFalhas && !refreshCancelled) {
+    label.textContent = `Verificando reunião ${nro}…`;
+    const pct = Math.round(((INICIO - nro) / INICIO) * 100);
+    bar.style.width = pct + '%';
+
+    const ata = await fetchDoc('ata', nro).catch(() => null);
+    const com = await fetchDoc('comunicado', nro).catch(() => null);
+
+    if (ata || com) {
+      meta.push({
+        nro,
+        dataAta: ata ? (ata.dataReferencia || ata.dataPublicacao) : null,
+        dataCom: com ? com.dataReferencia : null
+      });
+      falhasConsecutivas = 0;
+    } else {
+      falhasConsecutivas++;
+    }
+
+    processados++;
+    nro--;
+
+    // Yield para UI a cada 5 reuniões
+    if (processados % 5 === 0) await new Promise(r => setTimeout(r, 0));
+  }
+
+  if (refreshCancelled) return;
+
+  // Atualizar Selic também
+  label.textContent = 'Atualizando série Selic…';
+  bar.style.width = '95%';
+  localStorage.removeItem(CACHE_KEY_SELIC);
+  await getSelicData().catch(() => {});
+
+  // Salvar meta
+  if (meta.length > 0) {
+    setCache(CACHE_KEY_META, meta.sort((a, b) => b.nro - a.nro));
+  }
+
+  bar.style.width = '100%';
+  label.textContent = `Concluído! ${meta.length} reuniões indexadas.`;
+
+  document.getElementById('refreshActions').innerHTML = `
+    <button class="btn-ok" onclick="closeRefreshModal()">Fechar</button>
+  `;
+  document.getElementById('btnRefresh').classList.remove('loading');
+
+  // Recarregar gráfico Selic se estiver aberto
+  if (document.getElementById('tab3').classList.contains('active')) {
+    chartSelic = null;
+    loadSelic();
+  }
+}
+
+function cancelRefresh() {
+  refreshCancelled = true;
+  document.getElementById('refreshModal').classList.remove('open');
+  document.getElementById('btnRefresh').classList.remove('loading');
+}
+
+// Chart.js adapter para time scale
+const script = document.createElement('script');
+script.src = 'https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js';
+document.head.appendChild(script);
+</script>
+</body>
+</html>
