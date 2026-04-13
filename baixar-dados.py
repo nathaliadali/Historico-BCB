@@ -33,8 +33,8 @@ from html.parser import HTMLParser
 # -----------------------------------------------------------------------
 # Config
 # -----------------------------------------------------------------------
-REUNIAO_INICIO = 300
-MAX_FALHAS     = 6
+REUNIAO_INICIO = 280
+MAX_FALHAS     = 8
 DELAY_MS       = 120   # ms entre requests (não sobrecarrega a API)
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
