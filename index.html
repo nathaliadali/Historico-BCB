@@ -477,14 +477,26 @@
 <div class="modal-overlay" id="refreshModal">
   <div class="modal">
     <h2>Atualizar Base de Dados</h2>
-    <p id="refreshModalDesc">Isso vai buscar todas as reuniões disponíveis na API do BCB e atualizar o cache local. Use quando houver novas reuniões do COPOM.</p>
-    <div class="progress-bar-wrap" id="refreshProgressWrap" style="display:none">
-      <div class="progress-bar" id="refreshProgressBar"></div>
+    <p style="margin-bottom:14px">O botão abaixo abre o GitHub Actions — clique em <strong>"Run workflow"</strong> e aguarde ~5 minutos. O site atualiza automaticamente.</p>
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:14px 16px;font-size:.83rem;color:var(--muted);margin-bottom:20px;line-height:1.7">
+      <strong style="color:var(--text);display:block;margin-bottom:6px">O que acontece:</strong>
+      1. GitHub baixa apenas as reuniões novas da API do BCB<br>
+      2. Regenera o índice de busca com todos os documentos<br>
+      3. Publica automaticamente no GitHub Pages<br>
+      4. Atualize a página do app para ver os novos dados
     </div>
-    <div class="progress-label" id="refreshProgressLabel"></div>
-    <div class="modal-actions" id="refreshActions">
-      <button class="btn-cancel" onclick="closeRefreshModal()">Cancelar</button>
-      <button class="btn-ok" id="btnConfirmRefresh" onclick="startRefresh()">Atualizar agora</button>
+    <div style="font-size:.78rem;color:var(--muted);margin-bottom:18px">
+      Também roda toda terça-feira automaticamente, dia típico de publicação do COPOM.
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeRefreshModal()">Fechar</button>
+      <a href="https://github.com/nathaliadali/Historico-BCB/actions/workflows/atualizar-dados.yml"
+         target="_blank" rel="noopener"
+         class="btn-ok" style="text-decoration:none;display:flex;align-items:center;gap:7px"
+         onclick="closeRefreshModal()">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10,8 16,12 10,16"/></svg>
+        Abrir GitHub Actions
+      </a>
     </div>
   </div>
 </div>
@@ -669,7 +681,6 @@ const CACHE_KEY_DOCS    = 'bcb_docs_v2';
 
 let chartBusca = null;
 let chartSelic = null;
-let refreshCancelled = false;
 
 // =====================================================================
 // TABS
@@ -1348,105 +1359,13 @@ async function descobrirReunioes(onProgress) {
 // ATUALIZAR BASE
 // =====================================================================
 function openRefreshModal() {
-  refreshCancelled = false;
-  document.getElementById('refreshProgressWrap').style.display = 'none';
-  document.getElementById('refreshProgressLabel').textContent = '';
-  document.getElementById('refreshModalDesc').textContent = 'Isso vai buscar todas as reuniões disponíveis na API do BCB e atualizar o cache local. Use quando houver novas reuniões do COPOM.';
-  document.getElementById('refreshActions').innerHTML = `
-    <button class="btn-cancel" onclick="closeRefreshModal()">Cancelar</button>
-    <button class="btn-ok" id="btnConfirmRefresh" onclick="startRefresh()">Atualizar agora</button>
-  `;
   document.getElementById('refreshModal').classList.add('open');
 }
 
 function closeRefreshModal() {
-  refreshCancelled = true;
   document.getElementById('refreshModal').classList.remove('open');
-  document.getElementById('btnRefresh').classList.remove('loading');
 }
 
-async function startRefresh() {
-  refreshCancelled = false;
-  document.getElementById('btnConfirmRefresh').disabled = true;
-  document.getElementById('btnRefresh').classList.add('loading');
-  document.getElementById('refreshProgressWrap').style.display = 'block';
-  document.getElementById('refreshModalDesc').textContent = 'Buscando reuniões disponíveis na API do BCB…';
-  document.getElementById('refreshActions').innerHTML = `
-    <button class="btn-cancel" onclick="cancelRefresh()">Cancelar</button>
-  `;
-
-  clearCache();
-  _searchIndex = null; // força recarregar o índice
-
-  const INICIO = 270;
-  let nro = INICIO;
-  let falhasConsecutivas = 0;
-  const maxFalhas = 5;
-  const meta = [];
-  let processados = 0;
-
-  const bar   = document.getElementById('refreshProgressBar');
-  const label = document.getElementById('refreshProgressLabel');
-
-  while (nro >= 1 && falhasConsecutivas < maxFalhas && !refreshCancelled) {
-    label.textContent = `Verificando reunião ${nro}…`;
-    const pct = Math.round(((INICIO - nro) / INICIO) * 100);
-    bar.style.width = pct + '%';
-
-    const ata = await fetchDoc('ata', nro).catch(() => null);
-    const com = await fetchDoc('comunicado', nro).catch(() => null);
-
-    if (ata || com) {
-      meta.push({
-        nro,
-        dataAta: ata ? (ata.dataReferencia || ata.dataPublicacao) : null,
-        dataCom: com ? com.dataReferencia : null
-      });
-      falhasConsecutivas = 0;
-    } else {
-      falhasConsecutivas++;
-    }
-
-    processados++;
-    nro--;
-
-    // Yield para UI a cada 5 reuniões
-    if (processados % 5 === 0) await new Promise(r => setTimeout(r, 0));
-  }
-
-  if (refreshCancelled) return;
-
-  // Atualizar Selic também
-  label.textContent = 'Atualizando série Selic…';
-  bar.style.width = '95%';
-  localStorage.removeItem(CACHE_KEY_SELIC);
-  await getSelicData().catch(() => {});
-
-  // Salvar meta
-  if (meta.length > 0) {
-    setCache(CACHE_KEY_META, meta.sort((a, b) => b.nro - a.nro));
-  }
-
-  bar.style.width = '100%';
-  label.textContent = `Concluído! ${meta.length} reuniões indexadas.`;
-
-  document.getElementById('refreshActions').innerHTML = `
-    <button class="btn-ok" onclick="closeRefreshModal()">Fechar</button>
-  `;
-  document.getElementById('btnRefresh').classList.remove('loading');
-
-  // Recarregar gráfico Selic se estiver aberto
-  if (document.getElementById('tab3').classList.contains('active')) {
-    chartSelic = null;
-    loadSelic();
-  }
-}
-
-function cancelRefresh() {
-  refreshCancelled = true;
-  document.getElementById('refreshModal').classList.remove('open');
-  document.getElementById('btnRefresh').classList.remove('loading');
-}
 
 // =====================================================================
 // DATA NOS INPUTS DE REUNIÃO

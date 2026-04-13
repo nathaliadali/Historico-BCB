@@ -1,0 +1,40 @@
+name: Atualizar Dados BCB
+
+on:
+  workflow_dispatch:   # botão manual no GitHub Actions
+  schedule:
+    - cron: '0 14 * * 2'  # toda terça às 11h (horário de Brasília) — dia típico de publicação do COPOM
+
+jobs:
+  atualizar:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Baixar dados novos
+        run: python baixar-dados.py
+
+      - name: Commit e push (se houver dados novos)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/
+          if git diff --staged --quiet; then
+            echo "Nenhum dado novo. Base ja esta atualizada."
+          else
+            NOVAS=$(git diff --staged --name-only | grep "docs/" | wc -l)
+            git commit -m "data: atualizacao automatica $(date '+%d/%m/%Y') — $NOVAS arquivos novos"
+            git push
+            echo "Push realizado com sucesso."
+          fi
