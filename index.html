@@ -286,20 +286,24 @@
   .legend-dot { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
 
   .diff-output {
-    font-size: .88rem;
-    line-height: 1.9;
+    font-size: .93rem;
     color: var(--text);
-    white-space: pre-wrap;
     word-break: break-word;
-    max-height: 600px;
+    max-height: 640px;
     overflow-y: auto;
-    padding: 16px;
+    padding: 20px 24px;
     background: #fafbfd;
     border-radius: 8px;
     border: 1px solid var(--border);
   }
-  ins { color: var(--green); text-decoration: none; font-weight: 600; }
-  del { color: var(--red); text-decoration: line-through; opacity: .8; }
+  .diff-para {
+    margin-bottom: 1.1em;
+    line-height: 1.85;
+    text-align: justify;
+  }
+  .diff-para:last-child { margin-bottom: 0; }
+  ins { color: var(--green); text-decoration: none; font-weight: 600; background: #f0faea; border-radius: 2px; padding: 0 1px; }
+  del { color: var(--red); text-decoration: line-through; opacity: .75; background: #fdf0f0; border-radius: 2px; padding: 0 1px; }
 
   /* BUSCA */
   .search-results { margin-top: 20px; }
@@ -690,9 +694,24 @@ function fmtData(str) {
 }
 
 function htmlToText(html) {
+  if (!html) return '';
   const dp = new DOMParser();
   const doc = dp.parseFromString(html, 'text/html');
-  return doc.body ? doc.body.innerText : html;
+  // Insere \n\n após cada elemento de bloco para preservar parágrafos
+  doc.querySelectorAll('p, div, h1, h2, h3, h4, h5, h6, li, table, tr').forEach(el => {
+    el.insertAdjacentText('afterend', '\n\n');
+  });
+  doc.querySelectorAll('br').forEach(el => {
+    el.replaceWith(doc.createTextNode('\n'));
+  });
+  return (doc.body ? doc.body.innerText : html)
+    .replace(/\r\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 function getCache(key) {
@@ -789,17 +808,52 @@ function lcsSimple(a, b) {
   return result;
 }
 
-function renderDiff(oldText, newText) {
-  const tokOld = tokenize(oldText);
-  const tokNew = tokenize(newText);
+function diffParagrafo(oldP, newP) {
+  // Diff palavra-a-palavra dentro de um par de parágrafos
+  const tokOld = tokenize(oldP);
+  const tokNew = tokenize(newP);
   const ops = lcs(tokOld, tokNew);
   let html = '';
   let added = 0, removed = 0;
   for (const op of ops) {
-    const v = op.val.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    if (op.type === 'eq') html += v;
+    const v = escHtml(op.val);
+    if (op.type === 'eq')  html += v;
     else if (op.type === 'ins') { html += `<ins>${v}</ins>`; if (op.val.trim()) added++; }
-    else { html += `<del>${v}</del>`; if (op.val.trim()) removed++; }
+    else                        { html += `<del>${v}</del>`; if (op.val.trim()) removed++; }
+  }
+  return { html, added, removed };
+}
+
+function renderDiff(oldText, newText) {
+  // Divide em parágrafos e faz diff par-a-par para manter legibilidade
+  const splitParas = t => t.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
+  const oldParas = splitParas(oldText);
+  const newParas = splitParas(newText);
+
+  // Alinha parágrafos por posição (estrutura COPOM é consistente entre versões)
+  // Se a diferença de quantidade for grande, usa LCS ao nível de parágrafo para alinhar
+  let pairs = [];
+  if (Math.abs(oldParas.length - newParas.length) <= 4) {
+    const maxLen = Math.max(oldParas.length, newParas.length);
+    for (let i = 0; i < maxLen; i++) {
+      pairs.push({ o: oldParas[i] || '', n: newParas[i] || '' });
+    }
+  } else {
+    const ops = lcs(oldParas, newParas);
+    for (const op of ops) {
+      if (op.type === 'eq')  pairs.push({ o: op.val, n: op.val });
+      else if (op.type === 'del') pairs.push({ o: op.val, n: '' });
+      else                        pairs.push({ o: '', n: op.val });
+    }
+  }
+
+  let html = '';
+  let added = 0, removed = 0;
+  for (const { o, n } of pairs) {
+    const { html: ph, added: a, removed: r } = diffParagrafo(o, n);
+    html += `<p class="diff-para">${ph}</p>`;
+    added   += a;
+    removed += r;
   }
   return { html, added, removed };
 }
