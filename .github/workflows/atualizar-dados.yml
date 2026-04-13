@@ -3,7 +3,8 @@ name: Atualizar Dados BCB
 on:
   workflow_dispatch:   # botão manual no GitHub Actions
   schedule:
-    - cron: '0 14 * * 2'  # toda terça às 11h (horário de Brasília) — dia típico de publicação do COPOM
+    - cron: '15 11 * * 2'  # terça 08:15 Brasília (UTC-3 = 11:15 UTC)
+    - cron: '0 22 * * 3'   # quarta 19:00 Brasília (UTC-3 = 22:00 UTC)
 
 jobs:
   atualizar:
