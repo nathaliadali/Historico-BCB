@@ -392,6 +392,15 @@
   .selic-stat .val { font-size: 1.5rem; font-weight: 700; color: var(--bcb); }
   .selic-stat .lbl { font-size: .75rem; color: var(--muted); margin-top: 2px; }
 
+  /* DATA HINT abaixo do input */
+  .field-hint {
+    font-size: .75rem;
+    color: var(--teal);
+    min-height: 16px;
+    margin-top: 3px;
+    font-style: italic;
+  }
+
   /* SPINNER inline */
   .spinner {
     display: inline-block;
@@ -506,10 +515,12 @@
         <div class="field">
           <label>Reunião atual</label>
           <input type="number" id="ataReuniao" value="270" min="1" max="999">
+          <span class="field-hint" id="ataReuniaoData"></span>
         </div>
         <div class="field">
           <label>Reunião anterior</label>
           <input type="number" id="ataReuniaoAnterior" value="269" min="1" max="999">
+          <span class="field-hint" id="ataReuniaoAnteriorData"></span>
         </div>
         <button class="btn-primary" id="btnCompararAta" onclick="compararDocs('ata')">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -549,10 +560,12 @@
         <div class="field">
           <label>Reunião atual</label>
           <input type="number" id="comReuniao" value="270" min="1" max="999">
+          <span class="field-hint" id="comReuniaoData"></span>
         </div>
         <div class="field">
           <label>Reunião anterior</label>
           <input type="number" id="comReuniaoAnterior" value="269" min="1" max="999">
+          <span class="field-hint" id="comReuniaoAnteriorData"></span>
         </div>
         <button class="btn-primary" id="btnCompararCom" onclick="compararDocs('comunicado')">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -700,15 +713,29 @@ async function fetchDoc(type, nro) {
   const key = `${type}_${nro}`;
   if (docs[key]) return docs[key];
 
-  const url = type === 'ata' ? API_ATA(nro) : API_COM(nro);
-  const res = await fetch(url);
-  if (!res.ok) return null;
-  const json = await res.json();
-  if (!json.conteudo || json.conteudo.length === 0) return null;
-  const data = json.conteudo[0];
-  docs[key] = data;
-  setCache(cacheKey, docs);
-  return data;
+  // Tenta arquivo local primeiro (gerado pelo baixar-dados.js)
+  try {
+    const res = await fetch(`./data/docs/${type}_${nro}.json`);
+    if (res.ok) {
+      const data = await res.json();
+      docs[key] = data;
+      setCache(cacheKey, docs);
+      return data;
+    }
+  } catch {}
+
+  // Fallback: API do BCB
+  try {
+    const url = type === 'ata' ? API_ATA(nro) : API_COM(nro);
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const json = await res.json();
+    if (!json.conteudo || json.conteudo.length === 0) return null;
+    const data = json.conteudo[0];
+    docs[key] = data;
+    setCache(cacheKey, docs);
+    return data;
+  } catch { return null; }
 }
 
 // =====================================================================
@@ -856,15 +883,6 @@ async function compararDocs(tipo) {
   }, 30);
 }
 
-// Sincronizar inputs (N → N-1)
-document.getElementById('ataReuniao').addEventListener('input', function() {
-  const v = parseInt(this.value);
-  if (!isNaN(v) && v > 1) document.getElementById('ataReuniaoAnterior').value = v - 1;
-});
-document.getElementById('comReuniao').addEventListener('input', function() {
-  const v = parseInt(this.value);
-  if (!isNaN(v) && v > 1) document.getElementById('comReuniaoAnterior').value = v - 1;
-});
 
 // =====================================================================
 // BUSCA POR PALAVRA
@@ -879,8 +897,17 @@ async function buscar() {
   document.getElementById('searchResults').style.display = 'none';
   status.className = 'status';
 
-  // Descobrir reuniões do cache
+  // Descobrir reuniões: cache → arquivo local → API
   let meta = getCache(CACHE_KEY_META);
+  if (!meta || meta.length === 0) {
+    try {
+      const res = await fetch('./data/meta.json');
+      if (res.ok) {
+        meta = await res.json();
+        if (meta && meta.length > 0) setCache(CACHE_KEY_META, meta);
+      }
+    } catch {}
+  }
   if (!meta || meta.length === 0) {
     status.innerHTML = '<span class="spinner"></span>Descobrindo reuniões disponíveis (isso pode demorar na primeira vez)…';
     meta = await descobrirReunioes((n, total) => {
@@ -1067,6 +1094,19 @@ async function getSelicData() {
   let cached = getCache(CACHE_KEY_SELIC);
   if (cached && cached.length > 0) return cached;
 
+  // Tenta arquivo local primeiro
+  try {
+    const res = await fetch('./data/selic.json');
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.length > 0) {
+        setCache(CACHE_KEY_SELIC, data);
+        return data;
+      }
+    }
+  } catch {}
+
+  // Fallback: API do BCB
   const res = await fetch(API_SELIC).catch(() => null);
   if (!res || !res.ok) return null;
   const json = await res.json().catch(() => null);
@@ -1285,6 +1325,71 @@ function cancelRefresh() {
   document.getElementById('refreshModal').classList.remove('open');
   document.getElementById('btnRefresh').classList.remove('loading');
 }
+
+// =====================================================================
+// DATA NOS INPUTS DE REUNIÃO
+// =====================================================================
+const MESES = ['janeiro','fevereiro','março','abril','maio','junho',
+                'julho','agosto','setembro','outubro','novembro','dezembro'];
+
+function fmtMesAno(str) {
+  if (!str) return '';
+  const d = new Date(str);
+  if (isNaN(d)) return '';
+  return `${MESES[d.getMonth()]}/${d.getFullYear()}`;
+}
+
+async function lookupDate(tipo, nro, spanId) {
+  const span = document.getElementById(spanId);
+  if (!nro || isNaN(nro) || nro < 1) { span.textContent = ''; return; }
+  span.textContent = '…';
+  const doc = await fetchDoc(tipo, nro).catch(() => null);
+  if (!doc) { span.textContent = ''; return; }
+  const data = doc.dataReferencia || doc.dataPublicacao;
+  span.textContent = data ? `(${fmtMesAno(data)})` : '';
+}
+
+// Debounce helper
+function debounce(fn, ms) {
+  let t;
+  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+}
+
+// Atas
+const dAta  = debounce(v => lookupDate('ata', parseInt(v), 'ataReuniaoData'), 600);
+const dAtaA = debounce(v => lookupDate('ata', parseInt(v), 'ataReuniaoAnteriorData'), 600);
+document.getElementById('ataReuniao').addEventListener('input', function() {
+  const v = parseInt(this.value);
+  if (!isNaN(v) && v > 1) {
+    document.getElementById('ataReuniaoAnterior').value = v - 1;
+    dAtaA(v - 1);
+  }
+  dAta(this.value);
+});
+document.getElementById('ataReuniaoAnterior').addEventListener('input', function() {
+  dAtaA(this.value);
+});
+
+// Comunicados
+const dCom  = debounce(v => lookupDate('comunicado', parseInt(v), 'comReuniaoData'), 600);
+const dComA = debounce(v => lookupDate('comunicado', parseInt(v), 'comReuniaoAnteriorData'), 600);
+document.getElementById('comReuniao').addEventListener('input', function() {
+  const v = parseInt(this.value);
+  if (!isNaN(v) && v > 1) {
+    document.getElementById('comReuniaoAnterior').value = v - 1;
+    dComA(v - 1);
+  }
+  dCom(this.value);
+});
+document.getElementById('comReuniaoAnterior').addEventListener('input', function() {
+  dComA(this.value);
+});
+
+// Pré-carrega datas dos valores iniciais
+lookupDate('ata', 270, 'ataReuniaoData');
+lookupDate('ata', 269, 'ataReuniaoAnteriorData');
+lookupDate('comunicado', 270, 'comReuniaoData');
+lookupDate('comunicado', 269, 'comReuniaoAnteriorData');
 
 // Chart.js adapter para time scale
 const script = document.createElement('script');
