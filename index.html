@@ -941,17 +941,88 @@ async function compararDocs(tipo) {
 // =====================================================================
 // BUSCA POR PALAVRA
 // =====================================================================
+
+// Índice em memória — carregado uma vez de data/search-index.json
+let _searchIndex = null;
+
+async function loadSearchIndex() {
+  if (_searchIndex) return _searchIndex;
+  try {
+    const res = await fetch('./data/search-index.json');
+    if (res.ok) {
+      _searchIndex = await res.json();
+      return _searchIndex;
+    }
+  } catch {}
+  return null;
+}
+
 async function buscar() {
   const termo = document.getElementById('searchTerm').value.trim();
   if (!termo) return;
 
-  const btn = document.getElementById('btnBuscar');
+  const btn    = document.getElementById('btnBuscar');
   const status = document.getElementById('statusBusca');
   btn.disabled = true;
   document.getElementById('searchResults').style.display = 'none';
   status.className = 'status';
+  status.innerHTML = '<span class="spinner"></span>Carregando índice…';
+  await new Promise(r => setTimeout(r, 0));
 
-  // Descobrir reuniões: cache → arquivo local → API
+  // Caminho rápido: índice local (search-index.json gerado pelo baixar-dados.py)
+  const index = await loadSearchIndex();
+  if (index && index.length > 0) {
+    await buscarNoIndice(index, termo, btn, status);
+    return;
+  }
+
+  // Caminho lento: fallback via API (sem base local)
+  await buscarViaAPI(termo, btn, status);
+}
+
+async function buscarNoIndice(index, termo, btn, status) {
+  const termoLower = termo.toLowerCase();
+  const resultadosAtas = [];
+  const resultadosComs = [];
+  const datasEncontradas = new Set();
+
+  status.innerHTML = `<span class="spinner"></span>Buscando em ${index.length} reuniões…`;
+  await new Promise(r => setTimeout(r, 0));
+
+  for (const item of index) {
+    if (item.ata) {
+      const idx = item.ata.toLowerCase().indexOf(termoLower);
+      if (idx !== -1) {
+        resultadosAtas.push({
+          nro: item.nro,
+          data: fmtData(item.dataAta),
+          trecho: extrairTrecho(item.ata, idx, termoLower.length),
+          texto: item.ata,
+        });
+        datasEncontradas.add(item.dataAta);
+      }
+    }
+    if (item.com) {
+      const idx = item.com.toLowerCase().indexOf(termoLower);
+      if (idx !== -1) {
+        resultadosComs.push({
+          nro: item.nro,
+          data: fmtData(item.dataCom),
+          trecho: extrairTrecho(item.com, idx, termoLower.length),
+          texto: item.com,
+        });
+        datasEncontradas.add(item.dataCom);
+      }
+    }
+  }
+
+  renderResultados(resultadosAtas, resultadosComs, termo, datasEncontradas);
+  status.textContent = `${resultadosAtas.length + resultadosComs.length} ocorrências em ${index.length} reuniões.`;
+  btn.disabled = false;
+}
+
+async function buscarViaAPI(termo, btn, status) {
+  // Sem índice local — descobre reuniões via cache/meta.json/API e busca uma a uma
   let meta = getCache(CACHE_KEY_META);
   if (!meta || meta.length === 0) {
     try {
@@ -963,13 +1034,12 @@ async function buscar() {
     } catch {}
   }
   if (!meta || meta.length === 0) {
-    status.innerHTML = '<span class="spinner"></span>Descobrindo reuniões disponíveis (isso pode demorar na primeira vez)…';
+    status.innerHTML = '<span class="spinner"></span>Descobrindo reuniões disponíveis (pode demorar na primeira vez)…';
     meta = await descobrirReunioes((n, total) => {
       status.innerHTML = `<span class="spinner"></span>Indexando reunião ${n}… (${total} encontradas)`;
     });
     setCache(CACHE_KEY_META, meta);
   }
-
   if (!meta || meta.length === 0) {
     status.textContent = 'Não foi possível carregar a lista de reuniões.';
     status.className = 'status error';
@@ -983,42 +1053,34 @@ async function buscar() {
   const datasEncontradas = new Set();
   let processados = 0;
 
-  status.innerHTML = `<span class="spinner"></span>Buscando em ${meta.length} reuniões…`;
-
   for (const m of meta) {
     processados++;
     if (processados % 10 === 0) {
-      status.innerHTML = `<span class="spinner"></span>Buscando… ${processados}/${meta.length}`;
-      await new Promise(r => setTimeout(r, 0)); // yield para UI
+      status.innerHTML = `<span class="spinner"></span>Buscando via API… ${processados}/${meta.length}`;
+      await new Promise(r => setTimeout(r, 0));
     }
-
-    // Ata
     const ata = await fetchDoc('ata', m.nro).catch(() => null);
     if (ata) {
       const texto = htmlToText(ata.textoAta || '');
       const idx = texto.toLowerCase().indexOf(termoLower);
       if (idx !== -1) {
-        const trecho = extrairTrecho(texto, idx, termoLower.length);
-        resultadosAtas.push({ nro: m.nro, data: fmtData(ata.dataReferencia || ata.dataPublicacao), trecho, texto, titulo: ata.titulo });
+        resultadosAtas.push({ nro: m.nro, data: fmtData(ata.dataReferencia || ata.dataPublicacao), trecho: extrairTrecho(texto, idx, termoLower.length), texto });
         datasEncontradas.add(ata.dataReferencia || ata.dataPublicacao);
       }
     }
-
-    // Comunicado
     const com = await fetchDoc('comunicado', m.nro).catch(() => null);
     if (com) {
       const texto = htmlToText(com.textoComunicado || '');
       const idx = texto.toLowerCase().indexOf(termoLower);
       if (idx !== -1) {
-        const trecho = extrairTrecho(texto, idx, termoLower.length);
-        resultadosComs.push({ nro: m.nro, data: fmtData(com.dataReferencia), trecho, texto, titulo: com.titulo });
+        resultadosComs.push({ nro: m.nro, data: fmtData(com.dataReferencia), trecho: extrairTrecho(texto, idx, termoLower.length), texto });
         datasEncontradas.add(com.dataReferencia);
       }
     }
   }
 
   renderResultados(resultadosAtas, resultadosComs, termo, datasEncontradas);
-  status.textContent = `${resultadosAtas.length + resultadosComs.length} ocorrências encontradas em ${meta.length} reuniões.`;
+  status.textContent = `${resultadosAtas.length + resultadosComs.length} ocorrências em ${meta.length} reuniões.`;
   btn.disabled = false;
 }
 
@@ -1309,6 +1371,7 @@ async function startRefresh() {
   `;
 
   clearCache();
+  _searchIndex = null; // força recarregar o índice
 
   const INICIO = 270;
   let nro = INICIO;
