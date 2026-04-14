@@ -774,8 +774,10 @@ async function fetchDoc(type, nro) {
 // =====================================================================
 // DIFF PALAVRA-A-PALAVRA (LCS)
 // =====================================================================
+// Tokeniza por PALAVRAS APENAS (sem tokens de espaço)
+// Isso garante que groupOps consiga agrupar palavras del/ins consecutivas em frases
 function tokenize(text) {
-  return text.match(/\S+|\s+/g) || [];
+  return text.match(/\S+/g) || [];
 }
 
 function lcs(a, b) {
@@ -793,7 +795,8 @@ function lcs(a, b) {
   let i = m, j = n;
   while (i > 0 && j > 0) {
     if (a[i-1] === b[j-1]) { result.push({type:'eq', val:a[i-1]}); i--; j--; }
-    else if (dp[i-1][j] >= dp[i][j-1]) { result.push({type:'del', val:a[i-1]}); i--; }
+    // Prefer INS in backward traversal so that after reverse(), DEL precedes INS
+    else if (dp[i-1][j] > dp[i][j-1]) { result.push({type:'del', val:a[i-1]}); i--; }
     else { result.push({type:'ins', val:b[j-1]}); j--; }
   }
   while (i > 0) { result.push({type:'del', val:a[i-1]}); i--; }
@@ -822,12 +825,12 @@ function lcsSimple(a, b) {
   return result;
 }
 
-// Agrupa operações consecutivas do mesmo tipo → evita palavras soltas
+// Agrupa operações consecutivas do mesmo tipo em FRASES (palavras separadas por espaço)
 function groupOps(ops) {
   const result = [];
   for (const op of ops) {
     const last = result[result.length - 1];
-    if (last && last.type === op.type) last.val += op.val;
+    if (last && last.type === op.type) last.val += ' ' + op.val;
     else result.push({ type: op.type, val: op.val });
   }
   return result;
@@ -846,19 +849,32 @@ function similaridade(a, b) {
   return (2 * inter) / (setA.size + setB.size);
 }
 
+// Retorna { html, added, removed } com marcações inline, ou null se o diff
+// ficaria muito fragmentado (> 65% das palavras alteradas → melhor usar bloco).
 function diffParagrafo(oldP, newP) {
   const tokOld = tokenize(oldP);
   const tokNew = tokenize(newP);
-  const ops = groupOps(lcs(tokOld, tokNew));
-  let html = '';
+  if (!tokOld.length && !tokNew.length) return { html: '', added: 0, removed: 0 };
+
+  const rawOps = lcs(tokOld, tokNew);
+
+  // Calcula razão de mudança: se a maioria das palavras mudou, o diff inline
+  // ficaria fragmentado ("palavras soltas") — melhor usar bloco antes/depois
+  const total   = rawOps.length;
+  const changed = rawOps.filter(o => o.type !== 'eq').length;
+  if (total > 8 && changed / total > 0.65) return null;
+
+  const ops = groupOps(rawOps);
+  const parts = [];
   let added = 0, removed = 0;
   for (const op of ops) {
     const v = escHtml(op.val);
-    if (op.type === 'eq')  html += v;
-    else if (op.type === 'ins') { html += `<ins>${v}</ins>`; if (op.val.trim()) added++; }
-    else                        { html += `<del>${v}</del>`; if (op.val.trim()) removed++; }
+    const wc = op.val.split(' ').length;
+    if (op.type === 'eq')        parts.push(v);
+    else if (op.type === 'ins') { parts.push(`<ins>${v}</ins>`); added   += wc; }
+    else                        { parts.push(`<del>${v}</del>`); removed += wc; }
   }
-  return { html, added, removed };
+  return { html: parts.join(' '), added, removed };
 }
 
 // ── getParaOpcodes: SequenceMatcher de dois níveis (parágrafos → palavras) ─────
@@ -933,16 +949,22 @@ function renderDiff(oldDoc, newDoc, tipo) {
     const oldParas = parasOld.slice(i1, i2);
     const newParas = parasNew.slice(j1, j2);
 
-    if (tag === 'equal') {
-      // Mesmo parágrafo — mostra word-diff se houver diferença
-      const o = oldParas[0], n = newParas[0];
-      if (o === n) {
-        html += `<p class="diff-para">${escHtml(n)}</p>`;
+    // Utilitário: tenta word-diff; se muito fragmentado, usa bloco
+    const tryWordDiff = (o, n) => {
+      if (o === n) { html += `<p class="diff-para">${escHtml(n)}</p>`; return; }
+      const r = diffParagrafo(o, n);
+      if (r) {
+        html += `<p class="diff-para">${r.html}</p>`;
+        added += r.added; removed += r.removed;
       } else {
-        const { html: ph, added: a, removed: r } = diffParagrafo(o, n);
-        html += `<p class="diff-para">${ph}</p>`;
-        added += a; removed += r;
+        html += `<p class="diff-para"><del>${escHtml(o)}</del></p>`;
+        html += `<p class="diff-para"><ins>${escHtml(n)}</ins></p>`;
+        removed += countWords(o); added += countWords(n);
       }
+    };
+
+    if (tag === 'equal') {
+      tryWordDiff(oldParas[0], newParas[0]);
 
     } else if (tag === 'delete') {
       for (const p of oldParas) {
@@ -956,19 +978,9 @@ function renderDiff(oldDoc, newDoc, tipo) {
         added += countWords(p);
       }
 
-    } else { // 'replace': parágrafos sem par próximo
+    } else { // 'replace'
       if (oldParas.length === 1 && newParas.length === 1) {
-        // 1-para-1: word diff se ainda tem algo em comum; caso contrário, bloco
-        const o = oldParas[0], n = newParas[0];
-        if (similaridade(o, n) >= 0.25) {
-          const { html: ph, added: a, removed: r } = diffParagrafo(o, n);
-          html += `<p class="diff-para">${ph}</p>`;
-          added += a; removed += r;
-        } else {
-          html += `<p class="diff-para"><del>${escHtml(o)}</del></p>`;
-          html += `<p class="diff-para"><ins>${escHtml(n)}</ins></p>`;
-          removed += countWords(o); added += countWords(n);
-        }
+        tryWordDiff(oldParas[0], newParas[0]);
       } else {
         // N-para-M: mostra todos deletados, depois todos inseridos
         for (const p of oldParas) {
