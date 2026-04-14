@@ -96,7 +96,7 @@ class _ParagraphExtractor(HTMLParser):
     def _flush(self):
         import re
         text = re.sub(r'\s+', ' ', ''.join(self._current)).strip()
-        if len(text) > 3:
+        if len(text) > 0:
             self.paragraphs.append(text)
         self._current = []
 

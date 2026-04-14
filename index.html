@@ -706,12 +706,17 @@ function htmlToParagraphs(rawHtml) {
   const doc = dp.parseFromString(rawHtml, 'text/html');
   const paras = [];
 
-  // Preferência: elementos de bloco explícitos (evita nesting duplo de td/tr)
-  const blocks = doc.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6');
+  // Inclui td/th para capturar dados de tabelas (projeções de inflação, etc.)
+  // Exclui td/th que já contêm <p> para evitar duplicatas
+  const blocks = doc.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6, td, th');
   if (blocks.length > 0) {
     blocks.forEach(el => {
+      const tag = el.tagName.toLowerCase();
+      // Para células de tabela, pular se já contêm elemento de bloco filho
+      if ((tag === 'td' || tag === 'th') &&
+          el.querySelector('p, li, h1, h2, h3, h4, h5, h6')) return;
       const text = el.textContent.replace(/\s+/g, ' ').trim();
-      if (text.length > 3) paras.push(text);
+      if (text.length > 0) paras.push(text);
     });
   } else {
     // Fallback: divide por linhas
