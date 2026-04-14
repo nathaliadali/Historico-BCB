@@ -67,15 +67,52 @@ class _TextExtractor(HTMLParser):
 def html_to_text(raw):
     if not raw:
         return ""
-    # decodifica entidades HTML primeiro
     raw = html.unescape(raw)
     p = _TextExtractor()
     p.feed(raw)
     text = "".join(p.parts)
-    # normaliza quebras
     import re
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
+
+# -----------------------------------------------------------------------
+# HTML → lista de parágrafos (para diff estruturado)
+# -----------------------------------------------------------------------
+class _ParagraphExtractor(HTMLParser):
+    """Extrai cada elemento de bloco como um parágrafo separado."""
+    BLOCK = {'p', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'td', 'th', 'blockquote'}
+    def __init__(self):
+        super().__init__()
+        self._current = []
+        self.paragraphs = []
+    def handle_data(self, data):
+        self._current.append(data)
+    def handle_starttag(self, tag, attrs):
+        if tag in self.BLOCK:
+            self._flush()
+    def handle_endtag(self, tag):
+        if tag in self.BLOCK:
+            self._flush()
+    def _flush(self):
+        import re
+        text = re.sub(r'\s+', ' ', ''.join(self._current)).strip()
+        if len(text) > 3:
+            self.paragraphs.append(text)
+        self._current = []
+
+def html_to_paragraphs(raw):
+    """Retorna lista de parágrafos extraídos do HTML."""
+    if not raw:
+        return []
+    raw = html.unescape(raw)
+    p = _ParagraphExtractor()
+    p.feed(raw)
+    # Remove duplicatas consecutivas (pode ocorrer com elementos aninhados)
+    result = []
+    for para in p.paragraphs:
+        if not result or para != result[-1]:
+            result.append(para)
+    return result
 
 # -----------------------------------------------------------------------
 # HTTP
@@ -198,11 +235,17 @@ def baixar_reunioes():
         if ata_existe and not rebuild:
             with open(ata_file, encoding="utf-8") as f:
                 ata_data = json.load(f)
+            # Adiciona parágrafos se estiver faltando (migração)
+            if ata_data and "paragrafos" not in ata_data:
+                ata_data["paragrafos"] = html_to_paragraphs(ata_data.get("textoAta", ""))
+                with open(ata_file, "w", encoding="utf-8") as f:
+                    json.dump(ata_data, f, ensure_ascii=False)
             achou = True
         else:
             resp = fetch_json(API_ATA.format(nro))
             if resp and resp.get("conteudo"):
                 ata_data = resp["conteudo"][0]
+                ata_data["paragrafos"] = html_to_paragraphs(ata_data.get("textoAta", ""))
                 with open(ata_file, "w", encoding="utf-8") as f:
                     json.dump(ata_data, f, ensure_ascii=False)
                 achou = True
@@ -212,11 +255,17 @@ def baixar_reunioes():
         if com_existe and not rebuild:
             with open(com_file, encoding="utf-8") as f:
                 com_data = json.load(f)
+            # Adiciona parágrafos se estiver faltando (migração)
+            if com_data and "paragrafos" not in com_data:
+                com_data["paragrafos"] = html_to_paragraphs(com_data.get("textoComunicado", ""))
+                with open(com_file, "w", encoding="utf-8") as f:
+                    json.dump(com_data, f, ensure_ascii=False)
             achou = True
         else:
             resp = fetch_json(API_COM.format(nro))
             if resp and resp.get("conteudo"):
                 com_data = resp["conteudo"][0]
+                com_data["paragrafos"] = html_to_paragraphs(com_data.get("textoComunicado", ""))
                 with open(com_file, "w", encoding="utf-8") as f:
                     json.dump(com_data, f, ensure_ascii=False)
                 achou = True

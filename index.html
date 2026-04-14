@@ -699,21 +699,29 @@ function fmtData(str) {
   return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
-function htmlToText(html) {
-  if (!html) return '';
+// Extrai lista de parágrafos de HTML (BCB usa <p> com conteúdo estruturado)
+function htmlToParagraphs(rawHtml) {
+  if (!rawHtml) return [];
   const dp = new DOMParser();
-  const doc = dp.parseFromString(html, 'text/html');
-  // Insere \n\n após cada elemento de bloco para preservar parágrafos
-  doc.querySelectorAll('p, div, h1, h2, h3, h4, h5, h6, li, table, tr').forEach(el => {
-    el.insertAdjacentText('afterend', '\n\n');
-  });
-  doc.querySelectorAll('br').forEach(el => {
-    el.replaceWith(doc.createTextNode('\n'));
-  });
-  return (doc.body ? doc.body.innerText : html)
-    .replace(/\r\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+  const doc = dp.parseFromString(rawHtml, 'text/html');
+  const paras = [];
+
+  // Preferência: elementos de bloco explícitos (evita nesting duplo de td/tr)
+  const blocks = doc.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6');
+  if (blocks.length > 0) {
+    blocks.forEach(el => {
+      const text = el.textContent.replace(/\s+/g, ' ').trim();
+      if (text.length > 3) paras.push(text);
+    });
+  } else {
+    // Fallback: divide por linhas
+    (doc.body ? doc.body.textContent : rawHtml)
+      .split(/\n+/)
+      .forEach(l => { const t = l.replace(/\s+/g, ' ').trim(); if (t.length > 3) paras.push(t); });
+  }
+
+  // Remove duplicatas consecutivas (pode ocorrer com elementos aninhados)
+  return paras.filter((p, i) => i === 0 || p !== paras[i - 1]);
 }
 
 function escHtml(s) {
@@ -853,91 +861,125 @@ function diffParagrafo(oldP, newP) {
   return { html, added, removed };
 }
 
-// Divide texto em frases (preserva pontuação final)
-function splitSentences(text) {
-  const parts = text.split(/(?<=[.!?;])\s+/);
-  return parts.map(s => s.trim()).filter(Boolean);
+// ── getParaOpcodes: SequenceMatcher de dois níveis (parágrafos → palavras) ─────
+// Retorna opcodes: [tag, i1, i2, j1, j2]
+//   'equal'   → parágrafo "o mesmo" (pode ter pequena diferença)
+//   'replace' → parágrafos trocados (sem match adequado)
+//   'delete'  → parágrafo só no doc antigo
+//   'insert'  → parágrafo só no doc novo
+function getParaOpcodes(parasA, parasB, minSim = 0.55) {
+  const m = parasA.length, n = parasB.length;
+  if (m === 0 && n === 0) return [];
+  if (m === 0) return [['insert', 0, 0, 0, n]];
+  if (n === 0) return [['delete', 0, m, 0, 0]];
+
+  // Pré-computa matriz de similaridade (evita recalcular no backtrack)
+  const sim = Array.from({length: m}, (_, i) =>
+    Array.from({length: n}, (_, j) => similaridade(parasA[i], parasB[j]))
+  );
+
+  // DP: maior sequência de pares compatíveis preservando ordem
+  const dp = Array.from({length: m + 1}, () => new Uint16Array(n + 1));
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = sim[i-1][j-1] >= minSim
+        ? dp[i-1][j-1] + 1
+        : Math.max(dp[i-1][j], dp[i][j-1]);
+
+  // Backtrack para recuperar os pares emparelhados
+  const matched = [];
+  let i = m, j = n;
+  while (i > 0 && j > 0) {
+    if (sim[i-1][j-1] >= minSim && dp[i][j] === dp[i-1][j-1] + 1) {
+      matched.push([i - 1, j - 1]);
+      i--; j--;
+    } else if (dp[i-1][j] >= dp[i][j-1]) i--;
+    else j--;
+  }
+  matched.reverse();
+
+  // Gera opcodes a partir dos pares emparelhados
+  const ops = [];
+  let ai = 0, bi = 0;
+  for (const [ma, mb] of matched) {
+    if (ai < ma && bi < mb) ops.push(['replace', ai, ma, bi, mb]);
+    else if (ai < ma)       ops.push(['delete',  ai, ma, bi, bi]);
+    else if (bi < mb)       ops.push(['insert',  ai, ai, bi, mb]);
+    ops.push(['equal', ma, ma + 1, mb, mb + 1]);
+    ai = ma + 1; bi = mb + 1;
+  }
+  // Cauda não emparelhada
+  if      (ai < m && bi < n) ops.push(['replace', ai, m, bi, n]);
+  else if (ai < m)            ops.push(['delete',  ai, m, bi, n]);
+  else if (bi < n)            ops.push(['insert',  ai, m, bi, n]);
+
+  return ops;
 }
 
-// Diff de um segmento (frase ou parágrafo curto):
-// se similar → word-level inline; se diferente → del + ins
-function diffSegmento(o, n) {
-  if (!o) return { html: `<ins>${escHtml(n)}</ins>`, added: countWords(n), removed: 0 };
-  if (!n) return { html: `<del>${escHtml(o)}</del>`, added: 0, removed: countWords(o) };
-  const sim = similaridade(o, n);
-  if (sim >= 0.6) {
-    return diffParagrafo(o, n);            // diff inline agrupado
-  }
-  // Frase muito diferente: mostra antiga tachada + nova destacada lado a lado
-  return {
-    html: `<del>${escHtml(o)}</del> <ins>${escHtml(n)}</ins>`,
-    added: countWords(n), removed: countWords(o)
-  };
-}
+// ── renderDiff: compara dois documentos JSON parágrafo a parágrafo ─────────────
+function renderDiff(oldDoc, newDoc, tipo) {
+  const field   = tipo === 'ata' ? 'textoAta' : 'textoComunicado';
+  // Usa campo pré-processado (se disponível) ou extrai parágrafos do HTML
+  const parasOld = oldDoc['paragrafos'] || htmlToParagraphs(oldDoc[field] || '');
+  const parasNew = newDoc['paragrafos'] || htmlToParagraphs(newDoc[field] || '');
 
-// Emparelha frases/parágrafos por maior similaridade (greedy)
-function emparelhar(oldItems, newItems, minScore = 0.2) {
-  const usados = new Set();
-  const pairs  = [];
-  for (let ni = 0; ni < newItems.length; ni++) {
-    let bestIdx = -1, best = minScore;
-    for (let oi = 0; oi < oldItems.length; oi++) {
-      if (usados.has(oi)) continue;
-      const s = similaridade(oldItems[oi], newItems[ni]);
-      if (s > best) { best = s; bestIdx = oi; }
-    }
-    if (bestIdx >= 0) { usados.add(bestIdx); pairs.push({ o: oldItems[bestIdx], n: newItems[ni], s: best }); }
-    else              { pairs.push({ o: '', n: newItems[ni], s: 0 }); }
-  }
-  for (let oi = 0; oi < oldItems.length; oi++) {
-    if (!usados.has(oi)) pairs.push({ o: oldItems[oi], n: '', s: 0 });
-  }
-  return pairs;
-}
+  if (parasOld.length === 0 && parasNew.length === 0)
+    return { html: '<p class="muted">Documento sem conteúdo.</p>', added: 0, removed: 0 };
 
-function renderDiff(oldText, newText) {
-  const splitParas = t => t.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
-  const paraPairs  = emparelhar(splitParas(oldText), splitParas(newText), 0.15);
-
+  const ops = getParaOpcodes(parasOld, parasNew, 0.55);
   let html = '', added = 0, removed = 0;
 
-  for (const { o, n, s: sim } of paraPairs) {
-    if (!o && !n) continue;
+  for (const [tag, i1, i2, j1, j2] of ops) {
+    const oldParas = parasOld.slice(i1, i2);
+    const newParas = parasNew.slice(j1, j2);
 
-    // ── Parágrafo 100% novo ──────────────────────────────────────────────
-    if (!o) {
-      html += `<p class="diff-para"><ins>${escHtml(n)}</ins></p>`;
-      added += countWords(n);
-
-    // ── Parágrafo 100% removido ─────────────────────────────────────────
-    } else if (!n) {
-      html += `<p class="diff-para"><del>${escHtml(o)}</del></p>`;
-      removed += countWords(o);
-
-    // ── Mudança pequena (< 30% das palavras) → diff inline ──────────────
-    } else if (sim >= 0.7) {
-      const { html: ph, added: a, removed: r } = diffParagrafo(o, n);
-      html += `<p class="diff-para">${ph}</p>`;
-      added += a; removed += r;
-
-    // ── Mudança grande (> 70%) → bloco antes/depois ──────────────────────
-    } else if (sim < 0.3) {
-      html += `<div class="diff-block">` +
-                `<p class="diff-para"><del>${escHtml(o)}</del></p>` +
-                `<p class="diff-para"><ins>${escHtml(n)}</ins></p>` +
-              `</div>`;
-      added += countWords(n); removed += countWords(o);
-
-    // ── Zona cinza (30-70%) → processa frase por frase ───────────────────
-    } else {
-      const sentPairs = emparelhar(splitSentences(o), splitSentences(n), 0.2);
-      let paraHtml = '';
-      for (const sp of sentPairs) {
-        const r = diffSegmento(sp.o, sp.n);
-        paraHtml += r.html + ' ';
-        added += r.added; removed += r.removed;
+    if (tag === 'equal') {
+      // Mesmo parágrafo — mostra word-diff se houver diferença
+      const o = oldParas[0], n = newParas[0];
+      if (o === n) {
+        html += `<p class="diff-para">${escHtml(n)}</p>`;
+      } else {
+        const { html: ph, added: a, removed: r } = diffParagrafo(o, n);
+        html += `<p class="diff-para">${ph}</p>`;
+        added += a; removed += r;
       }
-      html += `<p class="diff-para">${paraHtml.trim()}</p>`;
+
+    } else if (tag === 'delete') {
+      for (const p of oldParas) {
+        html += `<p class="diff-para"><del>${escHtml(p)}</del></p>`;
+        removed += countWords(p);
+      }
+
+    } else if (tag === 'insert') {
+      for (const p of newParas) {
+        html += `<p class="diff-para"><ins>${escHtml(p)}</ins></p>`;
+        added += countWords(p);
+      }
+
+    } else { // 'replace': parágrafos sem par próximo
+      if (oldParas.length === 1 && newParas.length === 1) {
+        // 1-para-1: word diff se ainda tem algo em comum; caso contrário, bloco
+        const o = oldParas[0], n = newParas[0];
+        if (similaridade(o, n) >= 0.25) {
+          const { html: ph, added: a, removed: r } = diffParagrafo(o, n);
+          html += `<p class="diff-para">${ph}</p>`;
+          added += a; removed += r;
+        } else {
+          html += `<p class="diff-para"><del>${escHtml(o)}</del></p>`;
+          html += `<p class="diff-para"><ins>${escHtml(n)}</ins></p>`;
+          removed += countWords(o); added += countWords(n);
+        }
+      } else {
+        // N-para-M: mostra todos deletados, depois todos inseridos
+        for (const p of oldParas) {
+          html += `<p class="diff-para"><del>${escHtml(p)}</del></p>`;
+          removed += countWords(p);
+        }
+        for (const p of newParas) {
+          html += `<p class="diff-para"><ins>${escHtml(p)}</ins></p>`;
+          added += countWords(p);
+        }
+      }
     }
   }
 
@@ -997,11 +1039,8 @@ async function compararDocs(tipo) {
 
   status.innerHTML = '<span class="spinner"></span>Calculando diferenças…';
 
-  const textoAtual    = htmlToText(isAta ? (docAtual.textoAta || '') : (docAtual.textoComunicado || ''));
-  const textoAnterior = htmlToText(isAta ? (docAnterior.textoAta || '') : (docAnterior.textoComunicado || ''));
-
   setTimeout(() => {
-    const { html, added, removed } = renderDiff(textoAnterior, textoAtual);
+    const { html, added, removed } = renderDiff(docAnterior, docAtual, tipo);
 
     document.getElementById(diffId).innerHTML = html;
     document.getElementById(resultId).style.display = 'block';
@@ -1149,7 +1188,7 @@ async function buscarViaAPI(termo, btn, status) {
     }
     const ata = await fetchDoc('ata', m.nro).catch(() => null);
     if (ata) {
-      const texto = htmlToText(ata.textoAta || '');
+      const texto = htmlToParagraphs(ata.textoAta || '').join('\n\n');
       const idx = texto.toLowerCase().indexOf(termoLower);
       if (idx !== -1) {
         resultadosAtas.push({ nro: m.nro, data: fmtData(ata.dataReferencia || ata.dataPublicacao), trecho: extrairTrecho(texto, idx, termoLower.length), texto });
@@ -1158,7 +1197,7 @@ async function buscarViaAPI(termo, btn, status) {
     }
     const com = await fetchDoc('comunicado', m.nro).catch(() => null);
     if (com) {
-      const texto = htmlToText(com.textoComunicado || '');
+      const texto = htmlToParagraphs(com.textoComunicado || '').join('\n\n');
       const idx = texto.toLowerCase().indexOf(termoLower);
       if (idx !== -1) {
         resultadosComs.push({ nro: m.nro, data: fmtData(com.dataReferencia), trecho: extrairTrecho(texto, idx, termoLower.length), texto });
