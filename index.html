@@ -302,8 +302,8 @@
     text-align: justify;
   }
   .diff-para:last-child { margin-bottom: 0; }
-  ins { color: var(--red); text-decoration: underline; font-weight: normal; }
-  del { color: var(--red); text-decoration: line-through; opacity: .7; }
+  ins { color: #c0392b; text-decoration: underline; text-underline-offset: 2px; font-weight: normal; }
+  del { color: #c0392b; text-decoration: line-through; opacity: .6; }
 
   /* BUSCA */
   .search-results { margin-top: 20px; }
@@ -804,11 +804,34 @@ function lcsSimple(a, b) {
   return result;
 }
 
+// Agrupa operações consecutivas do mesmo tipo → evita palavras soltas
+function groupOps(ops) {
+  const result = [];
+  for (const op of ops) {
+    const last = result[result.length - 1];
+    if (last && last.type === op.type) last.val += op.val;
+    else result.push({ type: op.type, val: op.val });
+  }
+  return result;
+}
+
+// Similaridade entre dois parágrafos (0–1) via bigrams de palavras
+function similaridade(a, b) {
+  if (!a && !b) return 1;
+  if (!a || !b) return 0;
+  const words = t => t.toLowerCase().match(/\w+/g) || [];
+  const wa = words(a), wb = words(b);
+  if (wa.length === 0 && wb.length === 0) return 1;
+  const setA = new Set(wa), setB = new Set(wb);
+  let inter = 0;
+  setA.forEach(w => { if (setB.has(w)) inter++; });
+  return (2 * inter) / (setA.size + setB.size);
+}
+
 function diffParagrafo(oldP, newP) {
-  // Diff palavra-a-palavra dentro de um par de parágrafos
   const tokOld = tokenize(oldP);
   const tokNew = tokenize(newP);
-  const ops = lcs(tokOld, tokNew);
+  const ops = groupOps(lcs(tokOld, tokNew));
   let html = '';
   let added = 0, removed = 0;
   for (const op of ops) {
@@ -821,35 +844,46 @@ function diffParagrafo(oldP, newP) {
 }
 
 function renderDiff(oldText, newText) {
-  // Divide em parágrafos e faz diff par-a-par para manter legibilidade
   const splitParas = t => t.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
   const oldParas = splitParas(oldText);
   const newParas = splitParas(newText);
 
-  // Alinha parágrafos por posição (estrutura COPOM é consistente entre versões)
-  // Se a diferença de quantidade for grande, usa LCS ao nível de parágrafo para alinhar
-  let pairs = [];
-  if (Math.abs(oldParas.length - newParas.length) <= 4) {
-    const maxLen = Math.max(oldParas.length, newParas.length);
-    for (let i = 0; i < maxLen; i++) {
-      pairs.push({ o: oldParas[i] || '', n: newParas[i] || '' });
+  // Alinha parágrafos por melhor similaridade (greedy matching)
+  // Cada parágrafo novo é emparelhado com o parágrafo antigo mais similar
+  const usados = new Set();
+  const pairs = [];
+
+  for (let ni = 0; ni < newParas.length; ni++) {
+    let bestIdx = -1, bestScore = 0.15; // limiar mínimo de similaridade
+    for (let oi = 0; oi < oldParas.length; oi++) {
+      if (usados.has(oi)) continue;
+      const s = similaridade(oldParas[oi], newParas[ni]);
+      if (s > bestScore) { bestScore = s; bestIdx = oi; }
     }
-  } else {
-    const ops = lcs(oldParas, newParas);
-    for (const op of ops) {
-      if (op.type === 'eq')  pairs.push({ o: op.val, n: op.val });
-      else if (op.type === 'del') pairs.push({ o: op.val, n: '' });
-      else                        pairs.push({ o: '', n: op.val });
+    if (bestIdx >= 0) {
+      usados.add(bestIdx);
+      pairs.push({ o: oldParas[bestIdx], n: newParas[ni] });
+    } else {
+      // Parágrafo novo sem correspondente → todo adicionado
+      pairs.push({ o: '', n: newParas[ni] });
     }
+  }
+
+  // Parágrafos antigos sem par → todo removido
+  for (let oi = 0; oi < oldParas.length; oi++) {
+    if (!usados.has(oi)) pairs.push({ o: oldParas[oi], n: '' });
   }
 
   let html = '';
   let added = 0, removed = 0;
   for (const { o, n } of pairs) {
     const { html: ph, added: a, removed: r } = diffParagrafo(o, n);
-    html += `<p class="diff-para">${ph}</p>`;
-    added   += a;
-    removed += r;
+    // Só renderiza o parágrafo se tiver conteúdo visível
+    if (ph.trim()) {
+      html += `<p class="diff-para">${ph}</p>`;
+      added   += a;
+      removed += r;
+    }
   }
   return { html, added, removed };
 }
