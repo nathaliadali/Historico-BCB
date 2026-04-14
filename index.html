@@ -302,6 +302,16 @@
     text-align: justify;
   }
   .diff-para:last-child { margin-bottom: 0; }
+
+  /* Bloco de substituição: agrupa parágrafo antigo + novo com borda lateral */
+  .diff-block {
+    border-left: 3px solid var(--border);
+    padding-left: 14px;
+    margin: 1.3em 0;
+  }
+  .diff-block .diff-para { margin-bottom: 0.7em; }
+  .diff-block .diff-para:last-child { margin-bottom: 0; }
+
   ins { color: #1a7a2e; text-decoration: underline; text-underline-offset: 2px; font-weight: normal; }
   del { color: #c0392b; text-decoration: line-through; opacity: .7; }
 
@@ -848,44 +858,62 @@ function renderDiff(oldText, newText) {
   const oldParas = splitParas(oldText);
   const newParas = splitParas(newText);
 
-  // Alinha parágrafos por melhor similaridade (greedy matching)
-  // Cada parágrafo novo é emparelhado com o parágrafo antigo mais similar
+  // Emparelha cada parágrafo novo com o parágrafo antigo mais similar (greedy)
   const usados = new Set();
-  const pairs = [];
+  const pairs  = [];
 
   for (let ni = 0; ni < newParas.length; ni++) {
-    let bestIdx = -1, bestScore = 0.15; // limiar mínimo de similaridade
+    let bestIdx = -1, bestScore = 0.15;
     for (let oi = 0; oi < oldParas.length; oi++) {
       if (usados.has(oi)) continue;
       const s = similaridade(oldParas[oi], newParas[ni]);
       if (s > bestScore) { bestScore = s; bestIdx = oi; }
     }
-    if (bestIdx >= 0) {
-      usados.add(bestIdx);
-      pairs.push({ o: oldParas[bestIdx], n: newParas[ni] });
-    } else {
-      // Parágrafo novo sem correspondente → todo adicionado
-      pairs.push({ o: '', n: newParas[ni] });
-    }
+    if (bestIdx >= 0) { usados.add(bestIdx); pairs.push({ o: oldParas[bestIdx], n: newParas[ni], score: bestScore }); }
+    else              { pairs.push({ o: '', n: newParas[ni], score: 0 }); }
   }
-
-  // Parágrafos antigos sem par → todo removido
   for (let oi = 0; oi < oldParas.length; oi++) {
-    if (!usados.has(oi)) pairs.push({ o: oldParas[oi], n: '' });
+    if (!usados.has(oi)) pairs.push({ o: oldParas[oi], n: '', score: 0 });
   }
 
   let html = '';
   let added = 0, removed = 0;
-  for (const { o, n } of pairs) {
-    const { html: ph, added: a, removed: r } = diffParagrafo(o, n);
-    // Só renderiza o parágrafo se tiver conteúdo visível
-    if (ph.trim()) {
+
+  for (const { o, n, score } of pairs) {
+    if (!o && !n) continue;
+
+    if (!o) {
+      // Parágrafo 100% novo
+      html += `<p class="diff-para"><ins>${escHtml(n)}</ins></p>`;
+      added += countWords(n);
+
+    } else if (!n) {
+      // Parágrafo 100% removido
+      html += `<p class="diff-para"><del>${escHtml(o)}</del></p>`;
+      removed += countWords(o);
+
+    } else if (score > 0.85) {
+      // Mudança pequena (≤ ~15% das palavras) → diff palavra-a-palavra agrupado
+      const { html: ph, added: a, removed: r } = diffParagrafo(o, n);
       html += `<p class="diff-para">${ph}</p>`;
-      added   += a;
-      removed += r;
+      added += a; removed += r;
+
+    } else {
+      // Mudança significativa → mostra parágrafo antigo (tachado) + novo (destacado)
+      html += `<div class="diff-block">` +
+                `<p class="diff-para"><del>${escHtml(o)}</del></p>` +
+                `<p class="diff-para"><ins>${escHtml(n)}</ins></p>` +
+              `</div>`;
+      added   += countWords(n);
+      removed += countWords(o);
     }
   }
+
   return { html, added, removed };
+}
+
+function countWords(t) {
+  return (t.match(/\S+/g) || []).length;
 }
 
 // =====================================================================
